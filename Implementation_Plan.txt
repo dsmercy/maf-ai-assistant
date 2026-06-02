@@ -1,0 +1,367 @@
+================================================================================
+  ENTERPRISE LOCAL AI CODING ASSISTANT
+  Phased Implementation Plan
+================================================================================
+  Stack: .NET 10 | Ollama | Qdrant | PostgreSQL | Open WebUI | Docker
+  Total Estimated Duration: 32-46 Working Days
+================================================================================
+
+
+OVERVIEW
+--------
+Six phases ordered from core infrastructure to enterprise features. Every phase
+ends with a working, testable milestone before the next phase begins. All Docker
+commands are the developer's responsibility — see Prerequisites_Commands.txt.
+
+
+PHASE SUMMARY
+-------------
+  Phase 1  Infrastructure Foundation          3-5 days
+  Phase 2  Core API & Agent Skeleton          5-7 days
+  Phase 3  RAG Pipeline & Ingestion Service   7-10 days
+  Phase 4  Agent Intelligence & MCP           7-10 days
+  Phase 5  Open WebUI Integration & Auth      5-7 days
+  Phase 6  Enterprise Hardening               5-7 days
+
+
+--------------------------------------------------------------------------------
+PHASE 1 — INFRASTRUCTURE FOUNDATION
+Estimated Duration: 3-5 Days
+--------------------------------------------------------------------------------
+
+GOALS
+  Stand up all required infrastructure containers in Docker. Verify all services
+  are healthy and communicating before any application code is written.
+
+DELIVERABLES
+  - docker-compose.yml with all required service definitions
+  - Named Docker volumes for persistent data
+  - Environment variable configuration (.env file)
+  - Network bridge connecting all containers
+  - Health check endpoints verified for each container
+
+CONTAINERS TO CONFIGURE
+  open-webui       Frontend UI — chat interface, file uploads, model switching
+  ollama           Local LLM runtime — serves qwen3-coder:30b and nomic-embed-text
+  qdrant           Vector database — stores all code and document embeddings
+  postgres         Metadata database — repositories, jobs, audit logs, config
+
+DOCKER VOLUMES REQUIRED
+  ollama-models      Persists downloaded model weights
+  qdrant-data        Persists vector index
+  postgres-data      Persists all metadata
+  openwebui-data     Persists chat history, user accounts
+  repository-cache   Persists cloned repositories for re-indexing
+
+KEY PORT CONFIGURATION
+  Ollama        11434
+  Qdrant REST   6333
+  Qdrant gRPC   6334
+  PostgreSQL    5432
+  Open WebUI    3000
+  Shared network: ai-assistant-net (Docker bridge)
+
+MILESTONE VERIFICATION
+  [ ] docker compose up -d completes without errors
+  [ ] All containers show healthy in: docker compose ps
+  [ ] Qdrant responds at: http://localhost:6333/healthz
+  [ ] PostgreSQL accepts connections with configured credentials
+  [ ] Open WebUI loads at: http://localhost:3000
+  [ ] Ollama API responds at: http://localhost:11434/api/tags
+  [ ] Both models listed in: docker exec ollama ollama list
+
+
+--------------------------------------------------------------------------------
+PHASE 2 — CORE API & AGENT SKELETON
+Estimated Duration: 5-7 Days
+--------------------------------------------------------------------------------
+
+GOALS
+  Create the ASP.NET Core 10 solution with Clean Architecture and wire up the
+  Microsoft Agent Framework scaffold. Implement health checks, configuration
+  management, and DI. No AI logic yet — this is the application backbone.
+
+SOLUTION STRUCTURE
+  AssistantApi                 ASP.NET Core 10 Web API — entry point, middleware, controllers
+  AssistantApi.Core            Domain entities, interfaces, abstract agent contracts
+  AssistantApi.Application     Use cases, DTOs, FluentValidation, agent orchestration
+  AssistantApi.Infrastructure  EF Core, Qdrant client, Ollama client, repository impls
+  IngestionService             Background worker for repository cloning and indexing
+
+AGENT FRAMEWORK SCAFFOLD
+  OrchestratorAgent   Routes incoming chat messages to appropriate agents
+  RepositoryAgent     Stub: will search Qdrant for repository context
+  InstructionAgent    Stub: will retrieve coding standards from Qdrant
+  CodingAgent         Stub: will send assembled prompt to Ollama
+  All agents share IAgent interface with ExecuteAsync(AgentContext) method
+
+INFRASTRUCTURE ABSTRACTIONS
+  IOllamaClient          Abstraction for chat completions and embeddings
+  IVectorRepository      Abstraction for Qdrant upsert / search
+  IMetadataRepository    EF Core repository for PostgreSQL
+  Generic repository pattern with unit of work
+  FluentValidation pipeline behaviour registered in DI
+
+API ENDPOINTS (PHASE 2 SCOPE)
+  GET  /health          Liveness probe — returns 200 OK
+  GET  /health/ready    Readiness — checks Ollama, Qdrant, Postgres connectivity
+  POST /api/chat        Accepts chat message, routes through OrchestratorAgent (stub)
+  GET  /api/config      Returns active model names and feature flags
+
+NON-FUNCTIONAL REQUIREMENTS
+  - Serilog structured logging to stdout (Docker log driver compatible)
+  - Polly retry policies on all external HTTP calls
+  - appsettings.json + environment variable override pattern
+  - JWT middleware configured (validation deferred to Phase 5)
+
+MILESTONE VERIFICATION
+  [ ] dotnet build produces zero errors across all projects
+  [ ] GET /health returns 200
+  [ ] GET /health/ready confirms all 3 external services reachable
+  [ ] POST /api/chat returns a stub JSON response without crashing
+  [ ] Logs appear in: docker compose logs assistant-api (structured JSON)
+
+
+--------------------------------------------------------------------------------
+PHASE 3 — RAG PIPELINE & INGESTION SERVICE
+Estimated Duration: 7-10 Days
+--------------------------------------------------------------------------------
+
+GOALS
+  Implement the full document ingestion pipeline and semantic search. By the end
+  of this phase the assistant can ingest a repository or document and retrieve
+  relevant chunks to answer questions.
+
+INGESTION PIPELINE SEQUENCE
+  1. Source Input      Repository URL or ZIP upload or document upload
+  2. Clone / Extract   Git clone into repository-cache volume, or unzip archive
+  3. File Filtering    Include .cs .js .ts .tsx .json .xml .yml .yaml .md
+                       .sql .html .css .scss .txt
+  4. Chunking          Split files into overlapping chunks (512 tokens, 64 overlap)
+  5. Embedding         Call Ollama nomic-embed-text per chunk, batch for throughput
+  6. Upsert to Qdrant  Store vector + metadata — skip unchanged chunks (hash check)
+  7. Update Metadata   Record indexing status, file count, timestamp in PostgreSQL
+
+QDRANT COLLECTIONS
+  code-embeddings        Source code chunks
+                         Metadata: repo, branch, file path, language, chunk index
+  doc-embeddings         Documentation and PDF chunks
+                         Metadata: source, title, doc type, page
+  instruction-embeddings Coding standards and rules
+                         Metadata: rule set name, category, priority
+
+SEARCH MODES
+  - Semantic search    Cosine similarity on embedding vectors
+  - Hybrid search      Combine vector score with BM25 keyword score
+  - Metadata filter    Filter by repo name, language, document type, branch
+
+INCREMENTAL RE-INDEXING
+  - SHA-256 hash of each file stored in PostgreSQL
+  - On re-index, only files with changed hashes are re-embedded
+  - Deleted files are removed from Qdrant and the hash table
+
+SUPPORTED SOURCE TYPES
+  GitHub / GitLab / Azure DevOps   Clone via HTTPS with optional PAT for private repos
+  ZIP Upload                        Multipart upload — extracted to repository-cache volume
+  PDF                               Extracted with PdfPig — chunk by page
+  Markdown / TXT / DOCX             Plain text extraction — chunk by paragraph
+  Instruction Files (.md)           Stored in instruction-embeddings with priority metadata
+
+NEW API ENDPOINTS
+  POST   /api/repositories          Register a repo URL for indexing
+  POST   /api/repositories/upload   Upload a ZIP for indexing
+  GET    /api/repositories          List all registered repositories and their status
+  DELETE /api/repositories/{id}     Remove repository and its vectors
+  POST   /api/documents             Upload PDF / MD / TXT / DOCX for indexing
+  POST   /api/instructions          Upload coding standards / instruction files
+  GET    /api/search                Direct semantic search — query params: q, collection
+
+MILESTONE VERIFICATION
+  [ ] POST /api/repositories indexes a public GitHub repo end-to-end
+  [ ] Qdrant dashboard shows vectors in code-embeddings collection
+  [ ] GET /api/search?q=dependency+injection returns relevant code chunks
+  [ ] Re-indexing an unchanged repo skips all files (hash match)
+  [ ] PDF upload stores chunks in doc-embeddings collection
+  [ ] Instruction file upload stores rules in instruction-embeddings collection
+
+
+--------------------------------------------------------------------------------
+PHASE 4 — AGENT INTELLIGENCE & MCP INTEGRATION
+Estimated Duration: 7-10 Days
+--------------------------------------------------------------------------------
+
+GOALS
+  Activate the agent stubs from Phase 2 with real logic. Wire Qdrant retrieval
+  into the agent pipeline and connect Ollama for generation. Integrate MCP tool
+  servers for direct filesystem and Git inspection.
+
+ORCHESTRATOR AGENT — FULL IMPLEMENTATION
+  - Analyse incoming user message to classify intent
+  - Intent categories: code-generation, code-explanation, code-review,
+    unit-test, documentation, repository-question, general-question
+  - Build agent execution plan based on intent
+  - Invoke InstructionAgent first — always retrieve active coding standards
+  - Invoke RepositoryAgent if question involves repository context
+  - Pass assembled context to CodingAgent for generation
+  - Merge and return final response
+
+REPOSITORY AGENT — FULL IMPLEMENTATION
+  - Receive query + optional repo filter from Orchestrator
+  - Embed query using nomic-embed-text via Ollama
+  - Semantic search against code-embeddings collection in Qdrant
+  - Apply metadata filters: repository name, branch, language
+  - Return top-k chunks with file path, language, and similarity score
+  - Prefer MCP Git tool over RAG when user requests exact file content
+
+INSTRUCTION AGENT — FULL IMPLEMENTATION
+  - Always invoked before code generation
+  - Retrieve all active instruction files from instruction-embeddings
+  - Filter by relevance to current task (e.g. .NET standards for C# tasks)
+  - Format rules as a structured system prompt prefix
+  - Include forbidden patterns as explicit negative instructions to the model
+
+CODING AGENT — FULL IMPLEMENTATION
+  - Receive: user message + retrieved code context + instruction rules
+  - Build final prompt: system (instructions) + context (RAG chunks) + user message
+  - Call Ollama qwen3-coder:30b with streaming enabled
+  - Stream response tokens back through API to client
+  - Support all task types: generate, refactor, explain, review, test, document
+
+MCP TOOL INTEGRATION
+  Filesystem MCP    Read files directly from repository-cache volume
+  Git MCP           Run git log, git diff, git blame on cloned repositories
+  PostgreSQL MCP    Query metadata DB for repo registration and indexing history
+  Docker MCP        Query container health, restart failing services
+
+PROMPT TEMPLATES
+  - Templates stored in PostgreSQL prompt_templates table
+  - Parameterised placeholders: {instructions}, {context_chunks},
+    {user_message}, {language}
+  - Separate templates per task type — admin editable via API
+
+MILESTONE VERIFICATION
+  [ ] POST /api/chat with a coding question returns real Ollama response
+  [ ] Response includes code context retrieved from Qdrant
+  [ ] Response adheres to uploaded coding standards
+  [ ] Streaming works — tokens appear progressively in client
+  [ ] MCP Git tool retrieves exact file content when requested
+  [ ] Forbidden patterns (lazy loading, SQL in controllers) not generated
+
+
+--------------------------------------------------------------------------------
+PHASE 5 — OPEN WEBUI INTEGRATION & AUTH
+Estimated Duration: 5-7 Days
+--------------------------------------------------------------------------------
+
+GOALS
+  Connect Open WebUI to the assistant API so all agent capabilities are
+  accessible through the production UI. Enable authentication, chat history
+  persistence, and file uploads through the Open WebUI interface.
+
+OPEN WEBUI CONFIGURATION
+  - Configure Open WebUI to route custom model requests to ASP.NET API
+  - Register assistant as a custom OpenAI-compatible endpoint in Open WebUI
+  - Map model name 'ai-assistant' to POST /api/chat in the backend
+  - Retain direct Ollama access for raw model use alongside the assistant
+
+AUTHENTICATION
+  - Enable Open WebUI built-in authentication (local user accounts)
+  - JWT tokens issued by Open WebUI passed to ASP.NET API on each request
+  - ASP.NET API validates JWT on all non-health endpoints
+  - User identity extracted from JWT for audit logging
+
+CHAT HISTORY
+  - Open WebUI stores conversation history in its own volume (openwebui-data)
+  - ASP.NET API stores agent execution metadata per conversation in PostgreSQL
+  - Conversation ID threaded through all agent calls for traceability
+
+FILE UPLOADS VIA UI
+  - Open WebUI file upload forwarded to POST /api/repositories/upload or
+    POST /api/documents
+  - Progress indicator shown in UI during ingestion
+  - Supported types: ZIP (repository), PDF, MD, TXT, DOCX, MD (instructions)
+
+MULTI-MODEL SUPPORT
+  - Model selector shows: ai-assistant, qwen3-coder:30b, nomic-embed-text
+  - ai-assistant routes through full agent pipeline
+  - qwen3-coder:30b routes directly to Ollama (raw, no RAG)
+  - Additional Ollama models auto-appear without code changes
+
+KNOWLEDGE UPLOADS
+  - Open WebUI knowledge base connected to instruction-embeddings collection
+  - Users can upload coding standards directly from the knowledge tab
+  - Knowledge documents ingested via the instruction pipeline automatically
+
+MILESTONE VERIFICATION
+  [ ] User can register and log in to Open WebUI
+  [ ] Chat messages through Open WebUI trigger full agent pipeline
+  [ ] Chat history persists across browser sessions
+  [ ] File upload from UI correctly indexes a repository
+  [ ] Model selector switches between ai-assistant and raw Ollama models
+  [ ] JWT validation rejects unauthenticated API calls with 401
+
+
+--------------------------------------------------------------------------------
+PHASE 6 — ENTERPRISE HARDENING & OBSERVABILITY
+Estimated Duration: 5-7 Days
+--------------------------------------------------------------------------------
+
+GOALS
+  Harden the system for production use. Add comprehensive audit logging,
+  structured observability, input validation, secure file handling, and
+  backup/restore procedures.
+
+SECURITY
+  - Input validation on all API endpoints via FluentValidation pipeline
+  - File upload restrictions: allowed extensions, max size, MIME type check
+  - Repository URL allowlist / blocklist for enterprise git host control
+  - Secrets management: all credentials in environment variables only
+  - Audit log table: every API call, user identity, timestamp, action, IP
+  - Rate limiting on POST endpoints to prevent abuse
+
+OBSERVABILITY
+  Structured Logging    Serilog JSON to stdout — ingest with ELK, Seq, or Loki
+  Health Checks         GET /health/ready checks all downstream services
+  Metrics               OpenTelemetry counters: requests/sec, embedding latency,
+                        agent execution time
+  Distributed Tracing   Trace ID threaded through API → Agent → Qdrant → Ollama
+  Job Monitoring        Ingestion job status in PostgreSQL via GET /api/jobs
+
+BACKUP & RESTORE
+  PostgreSQL     pg_dump to backup volume — schedule via cron or external scheduler
+  Qdrant         Qdrant snapshot API — store snapshots in backup volume
+  Ollama Models  Volume backup — models can be re-pulled if lost
+  Open WebUI     Volume backup — preserves users, chat history, settings
+  Restore        pg_restore for Postgres; Qdrant restore snapshot API
+
+CONFIGURATION MANAGEMENT
+  - Feature flags in PostgreSQL feature_flags table
+  - Admin API endpoints for prompt templates, feature flags, model config
+  - All tuneable values (chunk size, overlap, top-k, temperature) in
+    appsettings.json
+  - Environment-specific overrides via Docker Compose environment sections
+
+RETRY & RESILIENCE
+  - Polly retry with exponential backoff on Ollama and Qdrant calls
+  - Circuit breaker on embedding calls — fail fast if Ollama is overloaded
+  - Ingestion job failure recovery — resume from last successful chunk
+
+DOCUMENTATION DELIVERABLES
+  - Deployment Guide — docker compose commands, environment variable reference
+  - Local Development Guide — running API outside Docker for hot reload
+  - Backup and Restore Guide — step-by-step with all commands
+  - Admin Guide — managing repositories, instructions, prompt templates
+
+MILESTONE VERIFICATION
+  [ ] Audit log records all API calls with user identity and timestamp
+  [ ] Malformed input returns 400 with FluentValidation error details
+  [ ] pg_dump backup completes and pg_restore produces working database
+  [ ] Qdrant snapshot saved and restored successfully
+  [ ] Trace IDs appear in logs across all service boundaries
+  [ ] docker compose down -v removes all data as expected
+  [ ] System passes full GET /health/ready check
+
+
+================================================================================
+END OF IMPLEMENTATION PLAN
+================================================================================

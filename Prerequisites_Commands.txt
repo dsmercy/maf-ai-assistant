@@ -1,0 +1,617 @@
+================================================================================
+  ENTERPRISE LOCAL AI CODING ASSISTANT
+  Prerequisites & Developer Commands
+================================================================================
+  All Docker and environment commands required before each phase.
+  Run by the developer — in order — before starting each phase.
+================================================================================
+
+  WARNING: Run all commands from your project root directory unless stated.
+  WARNING: Docker Desktop must be running before any docker command.
+  WARNING: Commands must be run in the order shown within each phase section.
+  WARNING: Never skip a section — each phase depends on the previous.
+
+
+================================================================================
+GLOBAL PREREQUISITES
+(Complete once before Phase 1)
+================================================================================
+
+REQUIRED SOFTWARE
+-----------------
+  Tool              Minimum Version    Download
+  Docker Desktop    4.28 or later      https://www.docker.com/products/docker-desktop
+  Git               2.40 or later      https://git-scm.com/downloads
+  .NET SDK 10       10.0 or later      https://dotnet.microsoft.com/download
+  Node.js           20 LTS (optional)  https://nodejs.org
+
+VERIFY INSTALLATIONS
+--------------------
+  docker --version
+  docker compose version
+  git --version
+  dotnet --version
+
+CREATE PROJECT ROOT
+-------------------
+  mkdir ai-coding-assistant
+  cd ai-coding-assistant
+
+  All subsequent commands assume you are inside ai-coding-assistant/
+
+
+================================================================================
+PHASE 1 PREREQUISITES — Infrastructure Foundation
+================================================================================
+
+STEP 1 — CREATE .env FILE
+--------------------------
+Create the file  ai-coding-assistant/.env  with the following content:
+
+  # PostgreSQL
+  POSTGRES_DB=assistant_db
+  POSTGRES_USER=assistant
+  POSTGRES_PASSWORD=change_this_password_in_production
+
+  # Ollama
+  OLLAMA_HOST=0.0.0.0
+
+  # Qdrant
+  QDRANT_HOST=qdrant
+  QDRANT_PORT=6333
+
+  # API
+  ASPNETCORE_ENVIRONMENT=Development
+  JWT_SECRET=replace_with_32_char_secret_minimum
+
+  # Open WebUI
+  WEBUI_SECRET_KEY=replace_with_secret_key
+  OLLAMA_BASE_URL=http://ollama:11434
+
+
+STEP 2 — CREATE docker-compose.yml
+------------------------------------
+Create docker-compose.yml at the project root with the following services,
+volumes, and the shared network. Save the file before running Step 3.
+
+  Services required:
+    - open-webui       (port 3000)
+    - ollama           (port 11434)
+    - qdrant           (ports 6333, 6334)
+    - postgres         (port 5432)
+
+  Volumes required (declare under top-level 'volumes:' key):
+    - ollama-models
+    - qdrant-data
+    - postgres-data
+    - openwebui-data
+    - repository-cache
+
+  Network required (declare under top-level 'networks:' key):
+    - ai-assistant-net
+
+  NOTE: All containers must reference the ai-assistant-net network.
+  NOTE: Volume names must match exactly as listed above.
+
+
+STEP 3 — CREATE NAMED VOLUMES
+------------------------------
+  docker volume create ollama-models
+  docker volume create qdrant-data
+  docker volume create postgres-data
+  docker volume create openwebui-data
+  docker volume create repository-cache
+
+
+STEP 4 — CREATE DOCKER NETWORK
+--------------------------------
+  docker network create ai-assistant-net
+
+
+STEP 5 — START ALL CONTAINERS
+------------------------------
+  docker compose up -d
+
+  # Wait ~30 seconds for containers to initialise, then check status
+  docker compose ps
+
+
+STEP 6 — PULL OLLAMA MODELS
+-----------------------------
+  # Coding model (~18 GB — allow 10-30 minutes)
+  docker exec ollama ollama pull qwen3-coder:30b
+
+  # Embedding model (~274 MB — allow 1-2 minutes)
+  docker exec ollama ollama pull nomic-embed-text
+
+  # Verify both models are available
+  docker exec ollama ollama list
+
+
+STEP 7 — VERIFY PHASE 1
+------------------------
+  # Check all containers are running
+  docker compose ps
+
+  # Test Qdrant health
+  curl http://localhost:6333/healthz
+
+  # Test Ollama API
+  curl http://localhost:11434/api/tags
+
+  # Test PostgreSQL connection
+  docker exec -it postgres psql -U assistant -d assistant_db -c "SELECT version();"
+
+  # Open WebUI — open in browser
+  # http://localhost:3000
+
+PHASE 1 COMPLETE WHEN:
+  [ ] All containers show 'healthy' or 'Up' in: docker compose ps
+  [ ] Both models appear in: docker exec ollama ollama list
+  [ ] Open WebUI loads at: http://localhost:3000
+
+
+================================================================================
+PHASE 2 PREREQUISITES — Core API & Agent Skeleton
+================================================================================
+
+NOTE: Phase 1 must be fully complete before starting Phase 2.
+
+
+STEP 1 — VERIFY PHASE 1 IS RUNNING
+-------------------------------------
+  docker compose ps
+
+  # If any container is not running:
+  docker compose up -d
+
+
+STEP 2 — INITIALISE POSTGRESQL SCHEMA
+---------------------------------------
+  # Run your init SQL script (replace path with your actual schema file)
+  docker exec -i postgres psql -U assistant -d assistant_db < schema/init.sql
+
+  # Verify tables were created
+  docker exec -it postgres psql -U assistant -d assistant_db -c "\dt"
+
+
+STEP 3 — CREATE QDRANT COLLECTIONS
+-------------------------------------
+  # code-embeddings collection (768 dimensions for nomic-embed-text)
+  curl -X PUT http://localhost:6333/collections/code-embeddings \
+    -H "Content-Type: application/json" \
+    -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
+
+  # doc-embeddings collection
+  curl -X PUT http://localhost:6333/collections/doc-embeddings \
+    -H "Content-Type: application/json" \
+    -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
+
+  # instruction-embeddings collection
+  curl -X PUT http://localhost:6333/collections/instruction-embeddings \
+    -H "Content-Type: application/json" \
+    -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
+
+  # Verify all three collections exist
+  curl http://localhost:6333/collections
+
+
+STEP 4 — CREATE .NET SOLUTION
+-------------------------------
+  dotnet new sln -n AssistantSolution
+  dotnet new webapi -n AssistantApi --framework net10.0
+  dotnet new classlib -n AssistantApi.Core --framework net10.0
+  dotnet new classlib -n AssistantApi.Application --framework net10.0
+  dotnet new classlib -n AssistantApi.Infrastructure --framework net10.0
+  dotnet new worker -n IngestionService --framework net10.0
+
+  # Add all projects to solution
+  dotnet sln add AssistantApi/AssistantApi.csproj
+  dotnet sln add AssistantApi.Core/AssistantApi.Core.csproj
+  dotnet sln add AssistantApi.Application/AssistantApi.Application.csproj
+  dotnet sln add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj
+  dotnet sln add IngestionService/IngestionService.csproj
+
+  # Add project references (Clean Architecture dependency flow)
+  dotnet add AssistantApi/AssistantApi.csproj \
+    reference AssistantApi.Application/AssistantApi.Application.csproj
+
+  dotnet add AssistantApi.Application/AssistantApi.Application.csproj \
+    reference AssistantApi.Core/AssistantApi.Core.csproj
+
+  dotnet add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj \
+    reference AssistantApi.Core/AssistantApi.Core.csproj
+
+  dotnet add AssistantApi/AssistantApi.csproj \
+    reference AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj
+
+  dotnet add IngestionService/IngestionService.csproj \
+    reference AssistantApi.Core/AssistantApi.Core.csproj
+
+  dotnet add IngestionService/IngestionService.csproj \
+    reference AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj
+
+
+STEP 5 — ADD NUGET PACKAGES
+-----------------------------
+  # FluentValidation
+  dotnet add AssistantApi.Application/AssistantApi.Application.csproj \
+    package FluentValidation.DependencyInjectionExtensions
+
+  # Entity Framework Core + PostgreSQL
+  dotnet add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj \
+    package Microsoft.EntityFrameworkCore
+  dotnet add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj \
+    package Npgsql.EntityFrameworkCore.PostgreSQL
+  dotnet add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj \
+    package Microsoft.EntityFrameworkCore.Design
+
+  # Qdrant client
+  dotnet add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj \
+    package Qdrant.Client
+
+  # Serilog
+  dotnet add AssistantApi/AssistantApi.csproj package Serilog.AspNetCore
+  dotnet add AssistantApi/AssistantApi.csproj package Serilog.Sinks.Console
+
+  # Polly resilience
+  dotnet add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj \
+    package Microsoft.Extensions.Http.Resilience
+
+  # JWT Authentication
+  dotnet add AssistantApi/AssistantApi.csproj \
+    package Microsoft.AspNetCore.Authentication.JwtBearer
+
+  # Microsoft Semantic Kernel (Agent Framework base)
+  dotnet add AssistantApi.Application/AssistantApi.Application.csproj \
+    package Microsoft.SemanticKernel
+  dotnet add AssistantApi.Application/AssistantApi.Application.csproj \
+    package Microsoft.SemanticKernel.Agents.Core
+
+  # Verify build
+  dotnet build AssistantSolution.sln
+
+
+STEP 6 — ADD assistant-api TO DOCKER COMPOSE
+----------------------------------------------
+  # After adding assistant-api service definition to docker-compose.yml:
+  docker compose build assistant-api
+  docker compose up -d assistant-api
+
+  # Verify API is reachable
+  curl http://localhost:5000/health
+
+PHASE 2 COMPLETE WHEN:
+  [ ] dotnet build produces zero errors
+  [ ] GET http://localhost:5000/health returns 200 OK
+  [ ] GET http://localhost:5000/health/ready confirms Ollama, Qdrant, Postgres
+  [ ] Three Qdrant collections visible at http://localhost:6333/collections
+
+
+================================================================================
+PHASE 3 PREREQUISITES — RAG Pipeline & Ingestion Service
+================================================================================
+
+NOTE: Phase 2 must be complete with a healthy assistant-api before Phase 3.
+
+
+STEP 1 — INSTALL DOCUMENT PARSING PACKAGES
+-------------------------------------------
+  # PDF parsing
+  dotnet add IngestionService/IngestionService.csproj package PdfPig
+
+  # DOCX parsing
+  dotnet add IngestionService/IngestionService.csproj \
+    package DocumentFormat.OpenXml
+
+  # Markdown processing
+  dotnet add IngestionService/IngestionService.csproj package Markdig
+
+  # Git operations
+  dotnet add IngestionService/IngestionService.csproj package LibGit2Sharp
+
+  dotnet build AssistantSolution.sln
+
+
+STEP 2 — CREATE UPLOAD DIRECTORIES
+------------------------------------
+  mkdir -p data/repository-cache
+  mkdir -p data/uploads
+
+  # Linux/Mac only — Windows uses Docker Desktop permissions
+  chmod 755 data/repository-cache data/uploads
+
+
+STEP 3 — ADD ingestion-service TO DOCKER COMPOSE
+--------------------------------------------------
+  # After adding ingestion-service to docker-compose.yml:
+  docker compose build ingestion-service
+  docker compose up -d ingestion-service
+
+  # Confirm ingestion service is running
+  docker compose logs ingestion-service --tail=20
+
+
+STEP 4 — RUN POSTGRESQL MIGRATION (PHASE 3 TABLES)
+----------------------------------------------------
+  # Option A — EF Core migrations
+  dotnet ef migrations add Phase3IngestionTables \
+    --project AssistantApi.Infrastructure \
+    --startup-project AssistantApi
+
+  dotnet ef database update \
+    --project AssistantApi.Infrastructure \
+    --startup-project AssistantApi
+
+  # Option B — Direct SQL script
+  docker exec -i postgres psql -U assistant -d assistant_db \
+    < schema/phase3_migration.sql
+
+  # Verify new tables
+  docker exec -it postgres psql -U assistant -d assistant_db -c "\dt"
+
+
+STEP 5 — TEST INGESTION END-TO-END
+-------------------------------------
+  # Index a small public repository
+  curl -X POST http://localhost:5000/api/repositories \
+    -H "Content-Type: application/json" \
+    -d "{\"url\": \"https://github.com/dotnet/samples\", \"branch\": \"main\"}"
+
+  # Check ingestion job status
+  curl http://localhost:5000/api/repositories
+
+  # Verify vectors in Qdrant
+  curl http://localhost:6333/collections/code-embeddings
+
+  # Test semantic search
+  curl "http://localhost:5000/api/search?q=dependency+injection&collection=code-embeddings"
+
+PHASE 3 COMPLETE WHEN:
+  [ ] Ingestion job status shows 'Completed'
+  [ ] Qdrant code-embeddings collection shows vectors_count > 0
+  [ ] Semantic search returns relevant code chunks
+  [ ] Re-indexing the same repo skips unchanged files
+
+
+================================================================================
+PHASE 4 PREREQUISITES — Agent Intelligence & MCP Integration
+================================================================================
+
+NOTE: Phase 3 must be complete with at least one indexed repository.
+
+
+STEP 1 — ADD MCP PACKAGES
+---------------------------
+  dotnet add AssistantApi.Application/AssistantApi.Application.csproj \
+    package ModelContextProtocol
+
+  dotnet build AssistantSolution.sln
+
+
+STEP 2 — ADD MCP SERVERS TO DOCKER COMPOSE
+-------------------------------------------
+  # After adding MCP server service definitions to docker-compose.yml:
+  docker compose up -d
+
+  # Verify MCP servers are running
+  docker compose ps | grep mcp
+
+
+STEP 3 — SEED PROMPT TEMPLATES
+--------------------------------
+  # Insert default prompt templates for each agent task type
+  docker exec -i postgres psql -U assistant -d assistant_db \
+    < schema/seed_prompt_templates.sql
+
+  # Verify templates inserted
+  docker exec -it postgres psql -U assistant -d assistant_db \
+    -c "SELECT name, task_type FROM prompt_templates;"
+
+
+STEP 4 — TEST FULL AGENT PIPELINE
+-----------------------------------
+  # Test code generation
+  curl -X POST http://localhost:5000/api/chat \
+    -H "Content-Type: application/json" \
+    -d "{\"message\": \"Generate a C# repository pattern for a User entity\", \"conversationId\": \"test-1\"}"
+
+  # Test code explanation
+  curl -X POST http://localhost:5000/api/chat \
+    -H "Content-Type: application/json" \
+    -d "{\"message\": \"Explain what dependency injection is\", \"conversationId\": \"test-2\"}"
+
+
+STEP 5 — TEST STREAMING
+-------------------------
+  curl -N -X POST http://localhost:5000/api/chat/stream \
+    -H "Content-Type: application/json" \
+    -d "{\"message\": \"Generate a unit test for a UserService class\", \"conversationId\": \"test-3\"}"
+
+PHASE 4 COMPLETE WHEN:
+  [ ] Chat returns real Ollama-generated responses
+  [ ] Responses contain code context retrieved from Qdrant
+  [ ] Coding standards from instruction-embeddings appear in generated code
+  [ ] Streaming endpoint delivers tokens progressively
+
+
+================================================================================
+PHASE 5 PREREQUISITES — Open WebUI Integration & Auth
+================================================================================
+
+NOTE: Phase 4 must be complete with working agent responses.
+
+
+STEP 1 — CONFIGURE OPEN WEBUI TO USE ASSISTANT API
+----------------------------------------------------
+  In Open WebUI browser at http://localhost:3000:
+
+  Navigate to: Admin Panel > Settings > Connections
+  Add a new OpenAI-compatible connection:
+    Name:     AI Coding Assistant
+    URL:      http://assistant-api:5000/api
+    API Key:  (use JWT token or leave blank for internal network)
+    Model:    ai-assistant
+
+
+STEP 2 — ENABLE AUTHENTICATION IN OPEN WEBUI
+----------------------------------------------
+  Add to docker-compose.yml under the open-webui service environment section:
+    WEBUI_AUTH: "True"
+    WEBUI_SECRET_KEY: (must match the value in your .env file)
+
+  # Restart Open WebUI to apply
+  docker compose stop open-webui
+  docker compose up -d open-webui
+
+  # Register the admin user at http://localhost:3000
+  # (the first user to register automatically becomes admin)
+
+
+STEP 3 — REBUILD API WITH JWT VALIDATION
+------------------------------------------
+  # After implementing JWT validation in AssistantApi:
+  docker compose build assistant-api
+  docker compose up -d assistant-api
+
+  # Verify unauthenticated requests are rejected
+  curl -X POST http://localhost:5000/api/chat \
+    -H "Content-Type: application/json" \
+    -d "{\"message\": \"test\"}"
+  # Expected response: 401 Unauthorized
+
+
+STEP 4 — TEST FILE UPLOAD VIA OPEN WEBUI
+------------------------------------------
+  In the Open WebUI browser interface:
+    1. Log in with your admin account
+    2. Click the attachment icon in the chat input
+    3. Upload a ZIP file (repository) or PDF (document)
+    4. Observe ingestion job created in backend logs
+
+  # Monitor ingestion from terminal
+  docker compose logs ingestion-service -f
+
+PHASE 5 COMPLETE WHEN:
+  [ ] Full chat workflow works through Open WebUI browser
+  [ ] Chat history persists after browser refresh
+  [ ] Unauthenticated API calls return 401
+  [ ] File uploads from UI trigger successful ingestion jobs
+
+
+================================================================================
+PHASE 6 PREREQUISITES — Enterprise Hardening & Observability
+================================================================================
+
+NOTE: Phase 5 must be fully working before starting Phase 6.
+
+
+STEP 1 — APPLY PHASE 6 DATABASE MIGRATIONS
+-------------------------------------------
+  # Option A — EF Core migrations
+  dotnet ef migrations add Phase6Hardening \
+    --project AssistantApi.Infrastructure \
+    --startup-project AssistantApi
+
+  dotnet ef database update \
+    --project AssistantApi.Infrastructure \
+    --startup-project AssistantApi
+
+  # Option B — Direct SQL script
+  docker exec -i postgres psql -U assistant -d assistant_db \
+    < schema/phase6_migration.sql
+
+  # Seed feature flags
+  docker exec -i postgres psql -U assistant -d assistant_db \
+    < schema/seed_feature_flags.sql
+
+
+STEP 2 — ADD BACKUP VOLUME AND CONTAINER
+-----------------------------------------
+  docker volume create assistant-backups
+
+  # After adding backup container to docker-compose.yml:
+  docker compose up -d backup
+
+
+STEP 3 — TEST POSTGRESQL BACKUP AND RESTORE
+--------------------------------------------
+  # Create a manual backup
+  docker exec postgres pg_dump -U assistant assistant_db \
+    > backup_$(date +%Y%m%d_%H%M%S).sql
+
+  # Test restore to a test database
+  docker exec -i postgres psql -U assistant -c "CREATE DATABASE assistant_db_test;"
+  docker exec -i postgres psql -U assistant assistant_db_test < backup_*.sql
+
+  # Verify tables in restored database
+  docker exec -it postgres psql -U assistant -d assistant_db_test -c "\dt"
+
+  # Clean up test database
+  docker exec -i postgres psql -U assistant -c "DROP DATABASE assistant_db_test;"
+
+
+STEP 4 — TEST QDRANT SNAPSHOT BACKUP AND RESTORE
+--------------------------------------------------
+  # Create snapshots for all three collections
+  curl -X POST http://localhost:6333/collections/code-embeddings/snapshots
+  curl -X POST http://localhost:6333/collections/doc-embeddings/snapshots
+  curl -X POST http://localhost:6333/collections/instruction-embeddings/snapshots
+
+  # List available snapshots (note the snapshot name from the response)
+  curl http://localhost:6333/collections/code-embeddings/snapshots
+
+  # To restore a snapshot (replace SNAPSHOT_NAME with actual name from above):
+  curl -X PUT http://localhost:6333/collections/code-embeddings/snapshots/recover \
+    -H "Content-Type: application/json" \
+    -d "{\"location\": \"file:///qdrant/snapshots/code-embeddings/SNAPSHOT_NAME\"}"
+
+
+STEP 5 — FINAL REBUILD AND HEALTH CHECK
+-----------------------------------------
+  # Rebuild all custom images
+  docker compose build
+
+  # Start everything
+  docker compose up -d
+
+  # Run full health check
+  curl http://localhost:5000/health/ready
+
+  # Verify audit logs are being written
+  docker exec -it postgres psql -U assistant -d assistant_db \
+    -c "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 10;"
+
+PHASE 6 COMPLETE WHEN:
+  [ ] Audit log records all API calls with user identity and timestamp
+  [ ] Malformed input returns 400 with FluentValidation error details
+  [ ] PostgreSQL backup and restore verified end-to-end
+  [ ] Qdrant snapshot backup and restore verified end-to-end
+  [ ] Trace IDs appear in logs across all service boundaries
+  [ ] GET /health/ready passes all service checks
+
+
+================================================================================
+TEARDOWN COMMANDS
+WARNING: These commands destroy data. Run backups before using them.
+================================================================================
+
+  # Stop all containers — data preserved in volumes
+  docker compose down
+
+  # Stop containers and REMOVE ALL VOLUMES (complete wipe)
+  docker compose down -v
+
+  # Remove all locally built images as well
+  docker compose down --rmi local
+
+  # Remove everything including downloaded images (nuclear option)
+  docker compose down -v --rmi all
+
+  # Remove the shared network if it persists after teardown
+  docker network rm ai-assistant-net
+
+
+================================================================================
+END OF PREREQUISITES & COMMANDS
+================================================================================
