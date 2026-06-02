@@ -54,6 +54,37 @@ services:
       retries: 5
       start_period: 15s
 
+  assistant-api:
+    build:
+      context: .
+      dockerfile: AssistantApi/Dockerfile
+    container_name: assistant-api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT}
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Ollama__BaseUrl: "http://ollama:11434"
+      Qdrant__Host: "qdrant"
+      Qdrant__Port: "6334"
+      Jwt__Secret: ${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # ollama:
+      #   condition: service_healthy
+      # qdrant:
+      #   condition: service_healthy
+    networks:
+      - ai-assistant-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   postgres:
     image: postgres:16-alpine
     container_name: postgres
