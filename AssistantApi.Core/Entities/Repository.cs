@@ -12,6 +12,8 @@ public class Repository
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastIndexedAt { get; set; }
     public string? ErrorMessage { get; set; }
+    public string? LocalPath { get; set; }
+    public string? Pat { get; set; }  // personal access token for private repos
 }
 
 public enum IndexingStatus

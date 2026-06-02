@@ -11,6 +11,7 @@ public interface IMetadataRepository
     Task DeleteRepositoryAsync(Guid id, CancellationToken ct = default);
 
     Task<IngestionJob?> GetJobAsync(Guid id, CancellationToken ct = default);
+    Task<IReadOnlyList<IngestionJob>> GetQueuedJobsAsync(CancellationToken ct = default);
     Task<IngestionJob> AddJobAsync(IngestionJob job, CancellationToken ct = default);
     Task UpdateJobAsync(IngestionJob job, CancellationToken ct = default);
 

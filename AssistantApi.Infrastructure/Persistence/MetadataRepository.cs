@@ -48,6 +48,13 @@ public class MetadataRepository : IMetadataRepository
     public Task<IngestionJob?> GetJobAsync(Guid id, CancellationToken ct = default)
         => _db.IngestionJobs.FirstOrDefaultAsync(j => j.Id == id, ct);
 
+    public async Task<IReadOnlyList<IngestionJob>> GetQueuedJobsAsync(CancellationToken ct = default)
+        => await _db.IngestionJobs
+            .Where(j => j.Status == IngestionJobStatus.Queued)
+            .OrderBy(j => j.CreatedAt)
+            .Take(5)
+            .ToListAsync(ct);
+
     public async Task<IngestionJob> AddJobAsync(IngestionJob job, CancellationToken ct = default)
     {
         _db.IngestionJobs.Add(job);

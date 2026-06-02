@@ -9,6 +9,7 @@ public class AssistantDbContext : DbContext
 
     public DbSet<Repository> Repositories => Set<Repository>();
     public DbSet<IngestionJob> IngestionJobs => Set<IngestionJob>();
+    public DbSet<FileHash> FileHashes => Set<FileHash>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
 
@@ -43,6 +44,14 @@ public class AssistantDbContext : DbContext
             e.HasKey(m => m.Id);
             e.Property(m => m.Role).IsRequired().HasMaxLength(32);
             e.Property(m => m.DetectedIntent).HasConversion<string>();
+        });
+
+        modelBuilder.Entity<FileHash>(e =>
+        {
+            e.HasKey(f => f.Id);
+            e.Property(f => f.FilePath).IsRequired().HasMaxLength(2048);
+            e.Property(f => f.Hash).IsRequired().HasMaxLength(64);
+            e.HasIndex(f => new { f.RepositoryId, f.FilePath }).IsUnique();
         });
     }
 }

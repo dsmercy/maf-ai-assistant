@@ -64,9 +64,9 @@ public class OllamaClient : IOllamaClient
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
 
-        while (!reader.EndOfStream && !ct.IsCancellationRequested)
+        string? line;
+        while ((line = await reader.ReadLineAsync(ct)) is not null && !ct.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(ct);
             if (string.IsNullOrWhiteSpace(line)) continue;
 
             JsonElement json;
