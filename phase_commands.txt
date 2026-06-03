@@ -1,0 +1,83 @@
+## Phase 1 — Commands to run manually
+Step 1 — Edit secrets in .env
+Open .env and replace these two values before proceeding:
+
+JWT_SECRET → any random 32+ character string
+WEBUI_SECRET_KEY → any random secret key
+
+Step 2 — Verify tool installations
+docker --version
+docker compose version
+git --version
+dotnet --version
+
+Step 3 — Create named volumes
+
+docker volume create ollama-models
+docker volume create qdrant-data
+docker volume create postgres-data
+docker volume create openwebui-data
+docker volume create repository-cache
+
+Step 4 — Create Docker network
+docker network create ai-assistant-net
+
+Step 5 — Start all containers
+docker compose up -d
+
+Wait ~30 seconds, then check status:
+
+docker compose ps
+
+Step 6 — Pull Ollama models
+docker exec ollama ollama pull nomic-embed-text
+
+Then the large coding model (~18 GB, 10-30 min):
+
+docker exec ollama ollama pull qwen3-coder:30b
+
+Verify:
+docker exec ollama ollama list
+
+Step 7 — Verify all services
+curl http://localhost:6333/healthz
+curl http://localhost:11434/api/tags
+docker exec -it postgres psql -U assistant -d assistant_db -c "SELECT version();"
+
+## Phase 2 — Commands to run manually
+
+docker compose build assistant-api
+docker compose up -d assistant-api
+docker compose ps
+
+#verify
+curl http://localhost:5000/health
+curl http://localhost:5000/health/ready
+curl http://localhost:5000/api/config
+
+## Phase 3
+docker compose build assistant-api ingestion-service
+docker compose up -d assistant-api ingestion-service
+
+//Then create the Qdrant collections (required before any indexing)
+curl -X PUT http://localhost:6333/collections/code-embeddings -H "Content-Type: application/json" -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
+curl -X PUT http://localhost:6333/collections/doc-embeddings -H "Content-Type: application/json" -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
+curl -X PUT http://localhost:6333/collections/instruction-embeddings -H "Content-Type: application/json" -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
+
+#upload a repository
+curl -X POST http://localhost:5000/api/repositories -H "Content-Type: application/json" -d "{\"url\": \"https://github.com/dotnet/samples\", \"branch\": \"main\"}"
+#check status
+curl --location 'http://localhost:5000/api/repositories'
+#Check how many vectors are in Qdrant
+curl http://localhost:6333/collections/code-embeddings
+
+
+#Reset stuck jobs directly in the DB
+ docker exec -it postgres psql -U assistant -d assistant_db -c "UPDATE \"IngestionJobs\" SET \"Status\" = 'Queued', \"StartedAt\" = NULL WHERE \"Status\" = 'Running';"
+
+# reset the repository statuses
+docker exec -it postgres psql -U assistant -d assistant_db -c "UPDATE \"Repositories\" SET \"Status\" = 'Pending' WHERE \"Status\" = 'Indexing';"
+
+#rebuild ingestion-service
+docker compose build ingestion-service
+docker compose up -d ingestion-service

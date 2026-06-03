@@ -22,6 +22,13 @@ public class Worker : BackgroundService
     {
         _logger.LogInformation("IngestionService worker started");
 
+        // Reset any jobs that were left in Running state by a previous crashed instance
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var metadata = scope.ServiceProvider.GetRequiredService<IMetadataRepository>();
+            await metadata.ResetStuckJobsAsync(stoppingToken);
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try

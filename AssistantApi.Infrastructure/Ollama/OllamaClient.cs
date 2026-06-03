@@ -99,6 +99,20 @@ public class OllamaClient : IOllamaClient
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<float[]>> EmbedBatchAsync(string model, IReadOnlyList<string> texts, CancellationToken ct = default)
+    {
+        // Ollama /api/embed accepts an array of inputs and returns embeddings[] in one round-trip
+        var payload = new { model, input = texts };
+        var response = await _http.PostAsJsonAsync("/api/embed", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+        return json.GetProperty("embeddings")
+            .EnumerateArray()
+            .Select(e => e.EnumerateArray().Select(v => v.GetSingle()).ToArray())
+            .ToList();
+    }
+
     public async Task<bool> IsHealthyAsync(CancellationToken ct = default)
     {
         try

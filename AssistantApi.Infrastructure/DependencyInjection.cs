@@ -20,6 +20,7 @@ public static class DependencyInjection
             options.UseNpgsql(configuration.GetConnectionString("Postgres")));
         services.AddScoped<IMetadataRepository, MetadataRepository>();
         services.AddScoped<IFileHashRepository, FileHashRepository>();
+        services.AddScoped<IPromptTemplateRepository, PromptTemplateRepository>();
 
         // Ollama
         var ollamaOptions = configuration.GetSection(OllamaOptions.SectionName).Get<OllamaOptions>()
@@ -29,7 +30,16 @@ public static class DependencyInjection
         {
             client.BaseAddress = new Uri(ollamaOptions.BaseUrl);
             client.Timeout = TimeSpan.FromMinutes(10);
-        }).AddStandardResilienceHandler();
+        }).AddStandardResilienceHandler(options =>
+        {
+            // LLM inference can take minutes — override the default 30s attempt timeout
+            options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(8);
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(10);
+            // Circuit breaker sampling must be >= 2× attempt timeout
+            options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(17);
+            options.Retry.MaxRetryAttempts = 2;
+            options.Retry.Delay = TimeSpan.FromSeconds(2);
+        });
 
         // Qdrant
         var qdrantHost = configuration["Qdrant:Host"] ?? "localhost";

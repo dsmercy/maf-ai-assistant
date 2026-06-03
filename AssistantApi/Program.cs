@@ -25,7 +25,7 @@ builder.Services.Configure<AssistantOptions>(builder.Configuration.GetSection(As
 // Infrastructure (EF, Ollama, Qdrant)
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// Agents
+// Agents — order matters: leaf agents first, orchestrator last
 builder.Services.AddScoped<RepositoryAgent>();
 builder.Services.AddScoped<InstructionAgent>();
 builder.Services.AddScoped<CodingAgent>();

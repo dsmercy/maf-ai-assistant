@@ -375,30 +375,26 @@ PHASE 3 COMPLETE WHEN:
 
 
 ================================================================================
-PHASE 4 PREREQUISITES — Agent Intelligence & MCP Integration
+PHASE 4 PREREQUISITES — Agent Intelligence & Streaming
 ================================================================================
 
 NOTE: Phase 3 must be complete with at least one indexed repository.
+NOTE: MCP integration has been moved to Phase 7. Phase 4 focuses on the
+      full RAG+agent pipeline and token streaming without MCP.
 
 
-STEP 1 — ADD MCP PACKAGES
----------------------------
-  dotnet add AssistantApi.Application/AssistantApi.Application.csproj \
-    package ModelContextProtocol
-
+STEP 1 — REBUILD API WITH PHASE 4 CODE
+----------------------------------------
   dotnet build AssistantSolution.sln
 
+  docker compose build assistant-api
+  docker compose up -d assistant-api
 
-STEP 2 — ADD MCP SERVERS TO DOCKER COMPOSE
--------------------------------------------
-  # After adding MCP server service definitions to docker-compose.yml:
-  docker compose up -d
-
-  # Verify MCP servers are running
-  docker compose ps | grep mcp
+  # Verify API is healthy
+  curl http://localhost:5000/health
 
 
-STEP 3 — SEED PROMPT TEMPLATES
+STEP 2 — SEED PROMPT TEMPLATES
 --------------------------------
   # Insert default prompt templates for each agent task type
   docker exec -i postgres psql -U assistant -d assistant_db \
@@ -409,7 +405,7 @@ STEP 3 — SEED PROMPT TEMPLATES
     -c "SELECT name, task_type FROM prompt_templates;"
 
 
-STEP 4 — TEST FULL AGENT PIPELINE
+STEP 3 — TEST FULL AGENT PIPELINE
 -----------------------------------
   # Test code generation
   curl -X POST http://localhost:5000/api/chat \
@@ -421,12 +417,17 @@ STEP 4 — TEST FULL AGENT PIPELINE
     -H "Content-Type: application/json" \
     -d "{\"message\": \"Explain what dependency injection is\", \"conversationId\": \"test-2\"}"
 
+  # Test with repository context (requires at least one indexed repo)
+  curl -X POST http://localhost:5000/api/chat \
+    -H "Content-Type: application/json" \
+    -d "{\"message\": \"How is dependency injection used in this codebase?\", \"conversationId\": \"test-3\"}"
 
-STEP 5 — TEST STREAMING
+
+STEP 4 — TEST STREAMING
 -------------------------
   curl -N -X POST http://localhost:5000/api/chat/stream \
     -H "Content-Type: application/json" \
-    -d "{\"message\": \"Generate a unit test for a UserService class\", \"conversationId\": \"test-3\"}"
+    -d "{\"message\": \"Generate a unit test for a UserService class\", \"conversationId\": \"test-4\"}"
 
 PHASE 4 COMPLETE WHEN:
   [ ] Chat returns real Ollama-generated responses
@@ -589,6 +590,51 @@ PHASE 6 COMPLETE WHEN:
   [ ] Qdrant snapshot backup and restore verified end-to-end
   [ ] Trace IDs appear in logs across all service boundaries
   [ ] GET /health/ready passes all service checks
+
+
+================================================================================
+PHASE 7 PREREQUISITES — MCP Tool Integration
+================================================================================
+
+NOTE: Phase 6 must be fully complete before starting Phase 7.
+NOTE: This phase is optional. The full RAG+agent pipeline works without MCP.
+      MCP adds exact file lookup and live Git inspection on top of RAG.
+
+
+STEP 1 — ADD MCP PACKAGE
+--------------------------
+  dotnet add AssistantApi.Application/AssistantApi.Application.csproj \
+    package ModelContextProtocol
+
+  dotnet build AssistantSolution.sln
+
+
+STEP 2 — ADD MCP SERVERS TO DOCKER COMPOSE
+-------------------------------------------
+  # After adding MCP server service definitions to docker-compose.yml:
+  docker compose up -d
+
+  # Verify MCP servers are running
+  docker compose ps | grep mcp
+
+
+STEP 3 — TEST MCP TOOLS
+-------------------------
+  # Test Git MCP — retrieve recent commits
+  curl -X POST http://localhost:5000/api/chat \
+    -H "Content-Type: application/json" \
+    -d "{\"message\": \"Show me the last 5 commits to UserService.cs\", \"conversationId\": \"mcp-test-1\"}"
+
+  # Test Filesystem MCP — exact file content
+  curl -X POST http://localhost:5000/api/chat \
+    -H "Content-Type: application/json" \
+    -d "{\"message\": \"Show me the exact content of Program.cs\", \"conversationId\": \"mcp-test-2\"}"
+
+PHASE 7 COMPLETE WHEN:
+  [ ] MCP Git tool retrieves exact file content on demand
+  [ ] git log / git diff available to agents via MCP
+  [ ] Filesystem MCP reads files from repository-cache volume
+  [ ] Agents prefer MCP exact lookup over RAG when user requests specific file
 
 
 ================================================================================

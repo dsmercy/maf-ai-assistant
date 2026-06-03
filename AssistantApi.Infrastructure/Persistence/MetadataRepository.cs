@@ -19,6 +19,9 @@ public class MetadataRepository : IMetadataRepository
     public Task<Repository?> GetRepositoryAsync(Guid id, CancellationToken ct = default)
         => _db.Repositories.FirstOrDefaultAsync(r => r.Id == id, ct);
 
+    public Task<Repository?> GetRepositoryByUrlAndBranchAsync(string url, string branch, CancellationToken ct = default)
+        => _db.Repositories.FirstOrDefaultAsync(r => r.Url == url && r.Branch == branch, ct);
+
     public async Task<IReadOnlyList<Repository>> GetAllRepositoriesAsync(CancellationToken ct = default)
         => await _db.Repositories.OrderByDescending(r => r.CreatedAt).ToListAsync(ct);
 
@@ -48,12 +51,38 @@ public class MetadataRepository : IMetadataRepository
     public Task<IngestionJob?> GetJobAsync(Guid id, CancellationToken ct = default)
         => _db.IngestionJobs.FirstOrDefaultAsync(j => j.Id == id, ct);
 
+    public async Task<IReadOnlyList<IngestionJob>> GetAllJobsAsync(int limit = 50, CancellationToken ct = default)
+        => await _db.IngestionJobs
+            .OrderByDescending(j => j.CreatedAt)
+            .Take(limit)
+            .ToListAsync(ct);
+
     public async Task<IReadOnlyList<IngestionJob>> GetQueuedJobsAsync(CancellationToken ct = default)
         => await _db.IngestionJobs
             .Where(j => j.Status == IngestionJobStatus.Queued)
             .OrderBy(j => j.CreatedAt)
             .Take(5)
             .ToListAsync(ct);
+
+    public async Task ResetStuckJobsAsync(CancellationToken ct = default)
+    {
+        // Jobs left in Running state from a previous crashed run are reset to Queued
+        var stuck = await _db.IngestionJobs
+            .Where(j => j.Status == IngestionJobStatus.Running)
+            .ToListAsync(ct);
+
+        foreach (var job in stuck)
+        {
+            job.Status = IngestionJobStatus.Queued;
+            job.StartedAt = null;
+        }
+
+        if (stuck.Count > 0)
+        {
+            await _db.SaveChangesAsync(ct);
+            _logger.LogWarning("Reset {Count} stuck Running jobs back to Queued", stuck.Count);
+        }
+    }
 
     public async Task<IngestionJob> AddJobAsync(IngestionJob job, CancellationToken ct = default)
     {

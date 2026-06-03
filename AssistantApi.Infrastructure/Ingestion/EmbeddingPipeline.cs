@@ -9,7 +9,8 @@ public class EmbeddingPipeline
     private readonly IVectorRepository _vectors;
     private readonly ILogger<EmbeddingPipeline> _logger;
 
-    private const int BatchSize = 10;
+    // How many chunks to send to Ollama in one /api/embed call
+    private const int EmbedBatchSize = 32;
 
     public EmbeddingPipeline(IOllamaClient ollama, IVectorRepository vectors, ILogger<EmbeddingPipeline> logger)
     {
@@ -19,7 +20,8 @@ public class EmbeddingPipeline
     }
 
     /// <summary>
-    /// Embeds a list of (chunkId, text, metadata) tuples and upserts them into the given collection.
+    /// Embeds all items using Ollama batch embed, then upserts to Qdrant.
+    /// One /api/embed call per EmbedBatchSize chunks instead of one call per chunk.
     /// </summary>
     public async Task EmbedAndUpsertAsync(
         string embeddingModel,
@@ -27,36 +29,40 @@ public class EmbeddingPipeline
         IReadOnlyList<(string Id, string Text, Dictionary<string, string> Metadata)> items,
         CancellationToken ct = default)
     {
-        var batches = items.Chunk(BatchSize);
+        if (items.Count == 0) return;
+
+        var batches = items.Chunk(EmbedBatchSize);
 
         foreach (var batch in batches)
         {
             ct.ThrowIfCancellationRequested();
 
-            var points = new List<VectorPoint>();
-            foreach (var (id, text, metadata) in batch)
+            var batchList = batch.ToList();
+            var texts = batchList.Select(b => b.Text).ToList();
+
+            IReadOnlyList<float[]> vectors;
+            try
             {
-                try
-                {
-                    var vector = await _ollama.EmbedAsync(embeddingModel, text, ct);
-                    points.Add(new VectorPoint
-                    {
-                        Id = id,
-                        Vector = vector,
-                        Content = text,
-                        Metadata = metadata
-                    });
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to embed chunk {Id}", id);
-                }
+                vectors = await _ollama.EmbedBatchAsync(embeddingModel, texts, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Batch embed failed for {Count} chunks, skipping batch", batchList.Count);
+                continue;
             }
 
-            if (points.Count > 0)
-                await _vectors.UpsertBatchAsync(collection, points, ct);
+            var points = batchList
+                .Zip(vectors, (item, vector) => new VectorPoint
+                {
+                    Id = item.Id,
+                    Vector = vector,
+                    Content = item.Text,
+                    Metadata = item.Metadata
+                })
+                .ToList();
 
-            _logger.LogDebug("Upserted batch of {Count} chunks to {Collection}", points.Count, collection);
+            await _vectors.UpsertBatchAsync(collection, points, ct);
+            _logger.LogDebug("Embedded and upserted {Count} chunks to {Collection}", points.Count, collection);
         }
     }
 }

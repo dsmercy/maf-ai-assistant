@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using AssistantApi.Application.Agents;
 using AssistantApi.Application.DTOs;
 using AssistantApi.Core.Interfaces;
@@ -27,7 +28,7 @@ public class ChatService
             CancellationToken = ct
         };
 
-        _logger.LogInformation("Chat request received for conversation {ConversationId}", request.ConversationId);
+        _logger.LogInformation("Chat request for conversation {ConversationId}", request.ConversationId);
 
         var result = await _orchestrator.ExecuteAsync(context);
 
@@ -44,5 +45,23 @@ public class ChatService
                 Score = c.Score
             }).ToList()
         };
+    }
+
+    public async IAsyncEnumerable<string> StreamAsync(
+        ChatRequest request,
+        string userId,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var context = new AgentContext
+        {
+            UserMessage = request.Message,
+            ConversationId = request.ConversationId,
+            UserId = userId,
+            RepositoryFilter = request.RepositoryFilter,
+            CancellationToken = ct
+        };
+
+        await foreach (var token in _orchestrator.StreamAsync(context))
+            yield return token;
     }
 }

@@ -11,15 +11,21 @@ namespace AssistantApi.Controllers;
 public class RepositoriesController : ControllerBase
 {
     private readonly IMetadataRepository _metadata;
+    private readonly IVectorRepository _vectors;
+    private readonly IFileHashRepository _fileHashes;
     private readonly IValidator<RegisterRepositoryRequest> _validator;
     private readonly ILogger<RepositoriesController> _logger;
 
     public RepositoriesController(
         IMetadataRepository metadata,
+        IVectorRepository vectors,
+        IFileHashRepository fileHashes,
         IValidator<RegisterRepositoryRequest> validator,
         ILogger<RepositoriesController> logger)
     {
         _metadata = metadata;
+        _vectors = vectors;
+        _fileHashes = fileHashes;
         _validator = validator;
         _logger = logger;
     }
@@ -31,13 +37,34 @@ public class RepositoriesController : ControllerBase
         return Ok(repos.Select(MapToResponse));
     }
 
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<RepositoryResponse>> GetById(Guid id, CancellationToken ct)
+    {
+        var repo = await _metadata.GetRepositoryAsync(id, ct);
+        if (repo is null) return NotFound();
+        return Ok(MapToResponse(repo));
+    }
+
     [HttpPost]
     public async Task<ActionResult<IngestionJobResponse>> Register(
         [FromBody] RegisterRepositoryRequest request, CancellationToken ct)
     {
         var validation = await _validator.ValidateAsync(request, ct);
         if (!validation.IsValid)
-            return BadRequest(validation.Errors.Select(e => e.ErrorMessage));
+            return BadRequest(new { errors = validation.Errors.Select(e => e.ErrorMessage) });
+
+        // Duplicate check — same URL + branch already registered
+        var existing = await _metadata.GetRepositoryByUrlAndBranchAsync(request.Url, request.Branch, ct);
+        if (existing is not null)
+        {
+            return Conflict(new
+            {
+                error = $"Repository '{existing.Name}' (branch: {existing.Branch}) is already registered.",
+                existingId = existing.Id,
+                status = existing.Status.ToString(),
+                hint = $"DELETE /api/repositories/{existing.Id} to remove it first, then register again."
+            });
+        }
 
         var repoName = DeriveRepoName(request.Url);
         var repo = new Repository
@@ -69,8 +96,7 @@ public class RepositoriesController : ControllerBase
     }
 
     [HttpPost("upload")]
-    public async Task<ActionResult<IngestionJobResponse>> Upload(
-        IFormFile file, CancellationToken ct)
+    public async Task<ActionResult<IngestionJobResponse>> Upload(IFormFile file, CancellationToken ct)
     {
         if (file is null || file.Length == 0)
             return BadRequest("No file provided.");
@@ -102,14 +128,80 @@ public class RepositoriesController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Deletes a repository and removes all its vectors from Qdrant and file hashes from the DB.
+    /// </summary>
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var repo = await _metadata.GetRepositoryAsync(id, ct);
-        if (repo is null) return NotFound();
+        if (repo is null) return NotFound(new { error = $"Repository {id} not found." });
 
+        // Remove all vectors for this repository from Qdrant
+        try
+        {
+            await _vectors.DeleteByFilterAsync("code-embeddings",
+                new Dictionary<string, string> { ["repository"] = repo.Name }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to delete Qdrant vectors for repo {RepoName} — continuing", repo.Name);
+        }
+
+        // Remove file hashes
+        await _fileHashes.DeleteByRepositoryAsync(id, ct);
+
+        // Remove metadata
         await _metadata.DeleteRepositoryAsync(id, ct);
+
+        _logger.LogInformation("Repository {RepoName} ({Id}) deleted", repo.Name, id);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Convenience endpoint: deletes existing registration and immediately re-registers the same URL+branch.
+    /// </summary>
+    [HttpPost("{id:guid}/reindex")]
+    public async Task<ActionResult<IngestionJobResponse>> Reindex(Guid id, CancellationToken ct)
+    {
+        var repo = await _metadata.GetRepositoryAsync(id, ct);
+        if (repo is null) return NotFound(new { error = $"Repository {id} not found." });
+
+        // Remove old vectors and hashes
+        try
+        {
+            await _vectors.DeleteByFilterAsync("code-embeddings",
+                new Dictionary<string, string> { ["repository"] = repo.Name }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to delete Qdrant vectors for repo {RepoName}", repo.Name);
+        }
+
+        await _fileHashes.DeleteByRepositoryAsync(id, ct);
+
+        // Reset repo status and queue a new job
+        repo.Status = IndexingStatus.Pending;
+        repo.ErrorMessage = null;
+        repo.LastIndexedAt = null;
+        await _metadata.UpdateRepositoryAsync(repo, ct);
+
+        var job = new IngestionJob
+        {
+            RepositoryId = repo.Id,
+            JobType = IngestionJobType.GitRepository,
+            Status = IngestionJobStatus.Queued
+        };
+        await _metadata.AddJobAsync(job, ct);
+
+        _logger.LogInformation("Repository {RepoName} queued for re-indexing, job {JobId}", repo.Name, job.Id);
+
+        return Accepted(new IngestionJobResponse
+        {
+            JobId = job.Id,
+            Status = "Queued",
+            Message = $"Repository '{repo.Name}' queued for re-indexing."
+        });
     }
 
     private static RepositoryResponse MapToResponse(Repository r) => new()

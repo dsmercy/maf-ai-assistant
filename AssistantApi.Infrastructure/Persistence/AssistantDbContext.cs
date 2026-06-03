@@ -10,6 +10,7 @@ public class AssistantDbContext : DbContext
     public DbSet<Repository> Repositories => Set<Repository>();
     public DbSet<IngestionJob> IngestionJobs => Set<IngestionJob>();
     public DbSet<FileHash> FileHashes => Set<FileHash>();
+    public DbSet<PromptTemplate> PromptTemplates => Set<PromptTemplate>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
 
@@ -44,6 +45,14 @@ public class AssistantDbContext : DbContext
             e.HasKey(m => m.Id);
             e.Property(m => m.Role).IsRequired().HasMaxLength(32);
             e.Property(m => m.DetectedIntent).HasConversion<string>();
+        });
+
+        modelBuilder.Entity<PromptTemplate>(e =>
+        {
+            e.HasKey(t => t.Id);
+            e.Property(t => t.TaskType).IsRequired().HasMaxLength(64);
+            e.Property(t => t.Name).IsRequired().HasMaxLength(256);
+            e.HasIndex(t => t.TaskType);
         });
 
         modelBuilder.Entity<FileHash>(e =>

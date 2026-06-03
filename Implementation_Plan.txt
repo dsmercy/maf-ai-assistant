@@ -19,9 +19,10 @@ PHASE SUMMARY
   Phase 1  Infrastructure Foundation          3-5 days
   Phase 2  Core API & Agent Skeleton          5-7 days
   Phase 3  RAG Pipeline & Ingestion Service   7-10 days
-  Phase 4  Agent Intelligence & MCP           7-10 days
+  Phase 4  Agent Intelligence & Streaming     5-7 days
   Phase 5  Open WebUI Integration & Auth      5-7 days
   Phase 6  Enterprise Hardening               5-7 days
+  Phase 7  MCP Tool Integration               3-5 days
 
 
 --------------------------------------------------------------------------------
@@ -186,14 +187,14 @@ MILESTONE VERIFICATION
 
 
 --------------------------------------------------------------------------------
-PHASE 4 — AGENT INTELLIGENCE & MCP INTEGRATION
-Estimated Duration: 7-10 Days
+PHASE 4 — AGENT INTELLIGENCE & STREAMING
+Estimated Duration: 5-7 Days
 --------------------------------------------------------------------------------
 
 GOALS
   Activate the agent stubs from Phase 2 with real logic. Wire Qdrant retrieval
-  into the agent pipeline and connect Ollama for generation. Integrate MCP tool
-  servers for direct filesystem and Git inspection.
+  into the agent pipeline and connect Ollama for generation. Enable true token
+  streaming. MCP tool integration is deferred to Phase 7.
 
 ORCHESTRATOR AGENT — FULL IMPLEMENTATION
   - Analyse incoming user message to classify intent
@@ -211,7 +212,6 @@ REPOSITORY AGENT — FULL IMPLEMENTATION
   - Semantic search against code-embeddings collection in Qdrant
   - Apply metadata filters: repository name, branch, language
   - Return top-k chunks with file path, language, and similarity score
-  - Prefer MCP Git tool over RAG when user requests exact file content
 
 INSTRUCTION AGENT — FULL IMPLEMENTATION
   - Always invoked before code generation
@@ -227,12 +227,6 @@ CODING AGENT — FULL IMPLEMENTATION
   - Stream response tokens back through API to client
   - Support all task types: generate, refactor, explain, review, test, document
 
-MCP TOOL INTEGRATION
-  Filesystem MCP    Read files directly from repository-cache volume
-  Git MCP           Run git log, git diff, git blame on cloned repositories
-  PostgreSQL MCP    Query metadata DB for repo registration and indexing history
-  Docker MCP        Query container health, restart failing services
-
 PROMPT TEMPLATES
   - Templates stored in PostgreSQL prompt_templates table
   - Parameterised placeholders: {instructions}, {context_chunks},
@@ -244,7 +238,6 @@ MILESTONE VERIFICATION
   [ ] Response includes code context retrieved from Qdrant
   [ ] Response adheres to uploaded coding standards
   [ ] Streaming works — tokens appear progressively in client
-  [ ] MCP Git tool retrieves exact file content when requested
   [ ] Forbidden patterns (lazy loading, SQL in controllers) not generated
 
 
@@ -360,6 +353,45 @@ MILESTONE VERIFICATION
   [ ] Trace IDs appear in logs across all service boundaries
   [ ] docker compose down -v removes all data as expected
   [ ] System passes full GET /health/ready check
+
+
+--------------------------------------------------------------------------------
+PHASE 7 — MCP TOOL INTEGRATION
+Estimated Duration: 3-5 Days
+--------------------------------------------------------------------------------
+
+GOALS
+  Extend the agent pipeline with MCP tool servers for direct filesystem and Git
+  inspection. This phase is optional — the full RAG pipeline works without it.
+  MCP adds exact file lookup and live Git inspection on top of semantic search.
+
+MCP TOOL INTEGRATION
+  Filesystem MCP    Read files directly from repository-cache volume
+  Git MCP           Run git log, git diff, git blame on cloned repositories
+  PostgreSQL MCP    Query metadata DB for repo registration and indexing history
+  Docker MCP        Query container health, restart failing services
+
+PREREQUISITES
+  dotnet add AssistantApi.Application/AssistantApi.Application.csproj \
+    package ModelContextProtocol
+
+DOCKER COMPOSE ADDITIONS
+  Add MCP server service definitions to docker-compose.yml, then:
+  docker compose up -d
+  docker compose ps | grep mcp
+
+USE CASES ENABLED BY MCP
+  - "Show me the last 5 commits to UserService.cs" — Git MCP
+  - "What changed in this file since last week?" — Git MCP diff
+  - "Show me the exact current content of Program.cs" — Filesystem MCP
+  - "Which repositories are indexed and when?" — PostgreSQL MCP
+  - "Is Ollama healthy right now?" — Docker MCP
+
+MILESTONE VERIFICATION
+  [ ] MCP Git tool retrieves exact file content on demand
+  [ ] git log / git diff / git blame available to agents
+  [ ] Filesystem MCP reads files from repository-cache volume
+  [ ] Agents prefer MCP exact lookup over RAG when user requests specific file
 
 
 ================================================================================

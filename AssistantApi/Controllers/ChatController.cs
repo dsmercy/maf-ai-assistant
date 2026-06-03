@@ -25,14 +25,42 @@ public class ChatController : ControllerBase
         return Ok(response);
     }
 
+    /// <summary>
+    /// Server-Sent Events streaming endpoint. Each token is delivered as:
+    ///   data: {"token":"..."}
+    /// Terminated by:
+    ///   data: [DONE]
+    /// </summary>
     [HttpPost("stream")]
     public async Task StreamChat([FromBody] ChatRequest request, CancellationToken ct)
     {
-        // Streaming will be fully wired in Phase 4; return same non-streaming response for now
         var userId = User.Identity?.Name ?? "anonymous";
-        var response = await _chatService.HandleAsync(request, userId, ct);
 
-        Response.ContentType = "text/event-stream";
-        await Response.WriteAsync($"data: {System.Text.Json.JsonSerializer.Serialize(response)}\n\n", ct);
+        Response.Headers.Append("Content-Type", "text/event-stream");
+        Response.Headers.Append("Cache-Control", "no-cache");
+        Response.Headers.Append("X-Accel-Buffering", "no");
+
+        try
+        {
+            await foreach (var token in _chatService.StreamAsync(request, userId, ct))
+            {
+                var escaped = System.Text.Json.JsonSerializer.Serialize(token);
+                await Response.WriteAsync($"data: {{\"token\":{escaped}}}\n\n", ct);
+                await Response.Body.FlushAsync(ct);
+            }
+
+            await Response.WriteAsync("data: [DONE]\n\n", ct);
+            await Response.Body.FlushAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // Client disconnected — normal
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Streaming error for conversation {ConversationId}", request.ConversationId);
+            await Response.WriteAsync($"data: {{\"error\":\"{ex.Message}\"}}\n\n", ct);
+            await Response.Body.FlushAsync(ct);
+        }
     }
 }
