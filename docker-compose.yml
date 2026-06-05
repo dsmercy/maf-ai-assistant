@@ -32,10 +32,21 @@ services:
       - "11434:11434"
     environment:
       OLLAMA_HOST: ${OLLAMA_HOST}
+      OLLAMA_KEEP_ALIVE: "24h"  # Keep model loaded in memory; set to -1 for permanent
     volumes:
       - ollama-models:/root/.ollama
     networks:
       - ai-assistant-net
+    # Uncomment the deploy section below if you have an NVIDIA GPU.
+    # Requires: NVIDIA Container Toolkit installed on the host.
+    # Install guide: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
       interval: 30s

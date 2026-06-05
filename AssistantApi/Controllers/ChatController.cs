@@ -1,6 +1,7 @@
 using AssistantApi.Application.DTOs;
 using AssistantApi.Application.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace AssistantApi.Controllers;
 
@@ -28,6 +29,7 @@ public class ChatController : ControllerBase
     /// </summary>
     /// <param name="request">Chat message, conversation ID, and optional repository filter.</param>
     [HttpPost]
+    [EnableRateLimiting("chat")]
     public async Task<ActionResult<ChatResponse>> Chat([FromBody] ChatRequest request, CancellationToken ct)
     {
         var userId = User.Identity?.Name ?? "anonymous";
@@ -42,6 +44,7 @@ public class ChatController : ControllerBase
     /// </summary>
     /// <param name="request">Chat message and conversation ID.</param>
     [HttpPost("stream")]
+    [EnableRateLimiting("chat")]
     public async Task StreamChat([FromBody] ChatRequest request, CancellationToken ct)
     {
         var userId = User.Identity?.Name ?? "anonymous";

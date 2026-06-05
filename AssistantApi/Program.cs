@@ -8,11 +8,16 @@ using AssistantApi.Middleware;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using OpenTelemetry.Metrics;
 using Serilog;
 using System.Text;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -117,6 +122,43 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Rate limiting — protect POST endpoints from abuse
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    // Chat: 20 requests per minute per IP
+    options.AddFixedWindowLimiter("chat", opt =>
+    {
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.PermitLimit = 20;
+        opt.QueueLimit = 0;
+        opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+    });
+
+    // Ingestion: 10 uploads per minute per IP
+    options.AddFixedWindowLimiter("ingestion", opt =>
+    {
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.PermitLimit = 10;
+        opt.QueueLimit = 0;
+        opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+    });
+});
+
+// OpenTelemetry — distributed tracing and metrics
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("assistant-api"))
+        .AddAspNetCoreInstrumentation(opts => opts.RecordException = true)
+        .AddHttpClientInstrumentation()
+        .AddConsoleExporter())   // swap for OTLP exporter in production
+    .WithMetrics(metrics => metrics
+        .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("assistant-api"))
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddConsoleExporter());
+
 var app = builder.Build();
 
 // Auto-apply EF migrations on startup
@@ -128,6 +170,7 @@ using (var scope = app.Services.CreateScope())
 
 app.UseMiddleware<ValidationExceptionMiddleware>();
 app.UseSerilogRequestLogging();
+app.UseRateLimiter();
 
 if (app.Environment.IsDevelopment())
 {
@@ -137,6 +180,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<AuditMiddleware>();
 
 // Liveness — always returns 200, no auth required
 app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }))

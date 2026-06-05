@@ -1,8 +1,11 @@
 using AssistantApi.Application.DTOs;
+using AssistantApi.Application.Validators;
+using AssistantApi.Validators;
 using AssistantApi.Core.Entities;
 using AssistantApi.Core.Interfaces;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace AssistantApi.Controllers;
 
@@ -46,6 +49,7 @@ public class RepositoriesController : ControllerBase
     }
 
     [HttpPost]
+    [EnableRateLimiting("ingestion")]
     public async Task<ActionResult<IngestionJobResponse>> Register(
         [FromBody] RegisterRepositoryRequest request, CancellationToken ct)
     {
@@ -98,13 +102,11 @@ public class RepositoriesController : ControllerBase
     [HttpPost("upload")]
     public async Task<ActionResult<IngestionJobResponse>> Upload(IFormFile file, CancellationToken ct)
     {
-        if (file is null || file.Length == 0)
-            return BadRequest("No file provided.");
+        var errors = FileUploadValidator.Validate(file, [".zip"]);
+        if (errors.Count > 0)
+            return BadRequest(new { errors });
 
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (ext != ".zip")
-            return BadRequest("Only .zip files are supported for repository upload.");
-
         var uploadDir = "/data/uploads";
         Directory.CreateDirectory(uploadDir);
         var destPath = Path.Combine(uploadDir, $"{Guid.NewGuid()}{ext}");

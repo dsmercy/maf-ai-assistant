@@ -11,6 +11,8 @@ public class AssistantDbContext : DbContext
     public DbSet<IngestionJob> IngestionJobs => Set<IngestionJob>();
     public DbSet<FileHash> FileHashes => Set<FileHash>();
     public DbSet<PromptTemplate> PromptTemplates => Set<PromptTemplate>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<FeatureFlag> FeatureFlags => Set<FeatureFlag>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
 
@@ -61,6 +63,24 @@ public class AssistantDbContext : DbContext
             e.Property(f => f.FilePath).IsRequired().HasMaxLength(2048);
             e.Property(f => f.Hash).IsRequired().HasMaxLength(64);
             e.HasIndex(f => new { f.RepositoryId, f.FilePath }).IsUnique();
+        });
+
+        modelBuilder.Entity<AuditLog>(e =>
+        {
+            e.HasKey(a => a.Id);
+            e.Property(a => a.TraceId).HasMaxLength(64);
+            e.Property(a => a.UserId).HasMaxLength(256);
+            e.Property(a => a.Method).HasMaxLength(10);
+            e.Property(a => a.Path).HasMaxLength(1024);
+            e.HasIndex(a => a.CreatedAt);
+            e.HasIndex(a => a.UserId);
+        });
+
+        modelBuilder.Entity<FeatureFlag>(e =>
+        {
+            e.HasKey(f => f.Id);
+            e.Property(f => f.Name).IsRequired().HasMaxLength(128);
+            e.HasIndex(f => f.Name).IsUnique();
         });
     }
 }

@@ -1,10 +1,16 @@
 using AssistantApi.Application.DTOs;
+using AssistantApi.Validators;
 using AssistantApi.Core.Entities;
 using AssistantApi.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AssistantApi.Controllers;
 
+/// <summary>
+/// Handles uploading documents and instruction files for ingestion into Qdrant.
+/// Documents are stored in doc-embeddings; instruction files in instruction-embeddings.
+/// File size, extension, and MIME type are validated before accepting the upload.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 public class DocumentsController : ControllerBase
@@ -12,8 +18,7 @@ public class DocumentsController : ControllerBase
     private readonly IMetadataRepository _metadata;
     private readonly ILogger<DocumentsController> _logger;
 
-    private static readonly HashSet<string> AllowedDocExtensions =
-        new(StringComparer.OrdinalIgnoreCase) { ".pdf", ".docx", ".md", ".txt" };
+    private static readonly string[] AllowedDocExtensions = [".pdf", ".docx", ".md", ".txt"];
 
     public DocumentsController(IMetadataRepository metadata, ILogger<DocumentsController> logger)
     {
@@ -21,24 +26,24 @@ public class DocumentsController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>Uploads a PDF, DOCX, MD, or TXT document for ingestion into doc-embeddings.</summary>
     [HttpPost]
     public Task<ActionResult<IngestionJobResponse>> UploadDocument(IFormFile file, CancellationToken ct)
-        => UploadInternal(file, IngestionJobType.Document, ct);
+        => UploadInternal(file, IngestionJobType.Document, AllowedDocExtensions, ct);
 
+    /// <summary>Uploads a coding standards / rules file for ingestion into instruction-embeddings.</summary>
     [HttpPost("/api/instructions")]
     public Task<ActionResult<IngestionJobResponse>> UploadInstruction(IFormFile file, CancellationToken ct)
-        => UploadInternal(file, IngestionJobType.InstructionFile, ct);
+        => UploadInternal(file, IngestionJobType.InstructionFile, AllowedDocExtensions, ct);
 
     private async Task<ActionResult<IngestionJobResponse>> UploadInternal(
-        IFormFile file, IngestionJobType jobType, CancellationToken ct)
+        IFormFile file, IngestionJobType jobType, string[] allowedExtensions, CancellationToken ct)
     {
-        if (file is null || file.Length == 0)
-            return BadRequest("No file provided.");
+        var errors = FileUploadValidator.Validate(file, allowedExtensions);
+        if (errors.Count > 0)
+            return BadRequest(new { errors });
 
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!AllowedDocExtensions.Contains(ext))
-            return BadRequest($"Unsupported file type '{ext}'. Allowed: {string.Join(", ", AllowedDocExtensions)}");
-
         var uploadDir = "/data/uploads";
         Directory.CreateDirectory(uploadDir);
         var destPath = Path.Combine(uploadDir, $"{Guid.NewGuid()}{ext}");
