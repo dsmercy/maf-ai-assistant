@@ -81,3 +81,11 @@ docker exec -it postgres psql -U assistant -d assistant_db -c "UPDATE \"Reposito
 #rebuild ingestion-service
 docker compose build ingestion-service
 docker compose up -d ingestion-service
+
+
+##phase 5 open webui 
+#Repository-aware code explanation prompt
+How is dependency injection configured in this codebase? Show me the specific files and patterns used.
+
+#Code generation using codebase patterns
+Generate a new repository class following the same pattern used in this codebase. The entity should be called "Product" with fields for Name, Price, and CategoryId.

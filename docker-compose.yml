@@ -7,13 +7,20 @@ services:
     ports:
       - "3000:8080"
     environment:
+      # Ollama direct access — keeps qwen3-coder:30b and nomic-embed-text in model selector
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+      # Authentication
+      WEBUI_AUTH: "True"
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+      # Do NOT set OPENAI_API_BASE_URL here — it overrides the model selector.
+      # Register assistant-api manually via Admin Panel > Settings > Connections instead.
     volumes:
       - openwebui-data:/app/backend/data
-    depends_on:
-      ollama:
-        condition: service_healthy
+    # depends_on:
+      # ollama:
+      #   condition: service_healthy
+      # assistant-api:
+      #   condition: service_healthy
     networks:
       - ai-assistant-net
 

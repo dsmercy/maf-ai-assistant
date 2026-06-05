@@ -9,11 +9,16 @@ namespace AssistantApi.Application.Services;
 public class ChatService
 {
     private readonly OrchestratorAgent _orchestrator;
+    private readonly IConversationRepository _conversations;
     private readonly ILogger<ChatService> _logger;
 
-    public ChatService(OrchestratorAgent orchestrator, ILogger<ChatService> logger)
+    public ChatService(
+        OrchestratorAgent orchestrator,
+        IConversationRepository conversations,
+        ILogger<ChatService> logger)
     {
         _orchestrator = orchestrator;
+        _conversations = conversations;
         _logger = logger;
     }
 
@@ -30,7 +35,14 @@ public class ChatService
 
         _logger.LogInformation("Chat request for conversation {ConversationId}", request.ConversationId);
 
+        // Persist user message
+        await _conversations.AddMessageAsync(request.ConversationId, userId, "user", request.Message, ct: ct);
+
         var result = await _orchestrator.ExecuteAsync(context);
+
+        // Persist assistant response
+        await _conversations.AddMessageAsync(request.ConversationId, userId, "assistant",
+            result.Response, result.Intent, result.LatencyMs, ct);
 
         return new ChatResponse
         {

@@ -65,7 +65,7 @@ Create the file  ai-coding-assistant/.env  with the following content:
   JWT_SECRET=replace_with_32_char_secret_minimum
 
   # Open WebUI
-  WEBUI_SECRET_KEY=replace_with_secret_key
+  WEBUI_SECRET_KEY=my_secret_32_char_secret_minimum
   OLLAMA_BASE_URL=http://ollama:11434
 
 

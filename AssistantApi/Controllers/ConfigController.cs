@@ -1,5 +1,6 @@
 using AssistantApi.Application.Configuration;
 using AssistantApi.Application.DTOs;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -7,6 +8,7 @@ namespace AssistantApi.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[AllowAnonymous]
 public class ConfigController : ControllerBase
 {
     private readonly AssistantOptions _options;
