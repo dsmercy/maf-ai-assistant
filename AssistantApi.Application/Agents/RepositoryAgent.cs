@@ -5,6 +5,19 @@ using Microsoft.Extensions.Options;
 
 namespace AssistantApi.Application.Agents;
 
+/// <summary>
+/// Retrieves relevant source code chunks from the indexed repositories using semantic search.
+/// This is the RAG (Retrieval-Augmented Generation) retrieval step.
+///
+/// Process:
+///   1. Embed the user's message into a 768-dimensional vector via Ollama nomic-embed-text
+///   2. Search the code-embeddings Qdrant collection for the most similar chunks
+///   3. Optionally filter results by repository name (from AgentContext.RepositoryFilter)
+///   4. Populate AgentContext.RetrievedChunks for CodingAgent to use in the prompt
+///
+/// Failures are non-fatal — if embedding or Qdrant search fails, the pipeline
+/// continues with an empty chunks list and the LLM answers from general knowledge.
+/// </summary>
 public class RepositoryAgent : IAgent
 {
     private readonly IOllamaClient _ollama;
@@ -26,6 +39,10 @@ public class RepositoryAgent : IAgent
         _logger = logger;
     }
 
+    /// <summary>
+    /// Embeds the user message and searches Qdrant for the top-K most relevant code chunks.
+    /// Results are written into context.RetrievedChunks and returned to the orchestrator.
+    /// </summary>
     public async Task<AgentResult> ExecuteAsync(AgentContext context)
     {
         try
@@ -57,7 +74,6 @@ public class RepositoryAgent : IAgent
         catch (Exception ex)
         {
             _logger.LogError(ex, "RepositoryAgent failed for conversation {ConversationId}", context.ConversationId);
-            // Non-fatal — continue without repository context
             return new AgentResult { Success = false, Response = string.Empty, ErrorMessage = ex.Message };
         }
     }

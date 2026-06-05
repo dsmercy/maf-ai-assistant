@@ -7,6 +7,22 @@ using Microsoft.Extensions.Logging;
 
 namespace IngestionService;
 
+/// <summary>
+/// Background worker service that polls PostgreSQL for queued ingestion jobs
+/// and processes them one at a time.
+///
+/// On startup, any jobs stuck in "Running" state (from a previous crashed instance)
+/// are reset to "Queued" so they are retried automatically.
+///
+/// The polling interval is 10 seconds. Each tick dequeues the oldest queued job
+/// and dispatches it to the appropriate ingestion handler based on job type:
+///   - GitRepository  → clone/fetch the repo, parse files, embed, upsert to Qdrant
+///   - ZipUpload      → extract the archive, then same as GitRepository
+///   - Document       → parse and embed into doc-embeddings
+///   - InstructionFile → parse and embed into instruction-embeddings
+///
+/// Each job runs in its own DI scope so DbContext and services are properly scoped.
+/// </summary>
 public class Worker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -18,11 +34,14 @@ public class Worker : BackgroundService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Main worker loop. Resets stuck jobs on startup, then polls every 10 seconds
+    /// for new queued jobs and processes them.
+    /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("IngestionService worker started");
 
-        // Reset any jobs that were left in Running state by a previous crashed instance
         using (var scope = _scopeFactory.CreateScope())
         {
             var metadata = scope.ServiceProvider.GetRequiredService<IMetadataRepository>();
@@ -50,6 +69,10 @@ public class Worker : BackgroundService
         _logger.LogInformation("IngestionService worker stopped");
     }
 
+    /// <summary>
+    /// Dequeues the next pending job from PostgreSQL and dispatches it to the
+    /// appropriate ingestion handler. Creates a new DI scope per job execution.
+    /// </summary>
     private async Task ProcessNextJobAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -57,8 +80,6 @@ public class Worker : BackgroundService
         var pipeline = scope.ServiceProvider.GetRequiredService<IIngestionPipeline>();
         var cloner = scope.ServiceProvider.GetRequiredService<IRepositoryCloner>();
 
-        // Find next queued job
-        // We query via the repository — a proper queue (e.g. outbox) can replace this in Phase 6
         var jobs = await metadata.GetQueuedJobsAsync(ct);
         var job = jobs.FirstOrDefault();
         if (job is null) return;
@@ -106,6 +127,11 @@ public class Worker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Handles a GitRepository job: clones or fetches the repo via LibGit2Sharp,
+    /// updates the repository status, then delegates to IngestionPipeline for
+    /// parsing, embedding, and Qdrant upsert.
+    /// </summary>
     private static async Task ProcessGitJobAsync(
         IngestionJob job,
         IMetadataRepository metadata,

@@ -5,6 +5,11 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace AssistantApi.Controllers;
 
+/// <summary>
+/// Provides visibility into the status of background ingestion jobs.
+/// Jobs are created when repositories or documents are registered for indexing
+/// and executed asynchronously by the IngestionService worker.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 public class JobsController : ControllerBase
@@ -14,8 +19,11 @@ public class JobsController : ControllerBase
     public JobsController(IMetadataRepository metadata) => _metadata = metadata;
 
     /// <summary>
-    /// Returns all recent ingestion jobs with status, progress, duration and error details.
+    /// Returns all recent ingestion jobs ordered by creation time (newest first).
+    /// Includes a summary of counts by status (queued, running, completed, failed)
+    /// and per-job details including progress percentage and duration.
     /// </summary>
+    /// <param name="limit">Maximum number of jobs to return. Defaults to 50.</param>
     [HttpGet]
     public async Task<ActionResult<JobSummaryResponse>> GetAll(
         [FromQuery] int limit = 50,
@@ -36,7 +44,8 @@ public class JobsController : ControllerBase
     }
 
     /// <summary>
-    /// Returns a single job by ID.
+    /// Returns a single ingestion job by its ID.
+    /// Useful for polling the status of a specific job after registration.
     /// </summary>
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<JobStatusResponse>> GetById(Guid id, CancellationToken ct)

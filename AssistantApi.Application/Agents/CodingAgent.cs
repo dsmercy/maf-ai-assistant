@@ -6,6 +6,17 @@ using Microsoft.Extensions.Options;
 
 namespace AssistantApi.Application.Agents;
 
+/// <summary>
+/// The final agent in the pipeline. Assembles the full LLM prompt from the context
+/// populated by InstructionAgent and RepositoryAgent, then calls the Ollama model.
+///
+/// Prompt assembly:
+///   - Loads a PromptTemplate from PostgreSQL matching the detected intent
+///   - Fills placeholders: {instructions}, {context_chunks}, {user_message}, {language}
+///   - Falls back to a hardcoded default if no template exists in the database
+///
+/// Provides both blocking (ExecuteAsync) and streaming (StreamAsync) variants.
+/// </summary>
 public class CodingAgent : IAgent
 {
     private readonly IOllamaClient _ollama;
@@ -27,6 +38,10 @@ public class CodingAgent : IAgent
         _logger = logger;
     }
 
+    /// <summary>
+    /// Builds the prompt and calls the LLM synchronously, waiting for the full response.
+    /// Used by POST /api/chat.
+    /// </summary>
     public async Task<AgentResult> ExecuteAsync(AgentContext context)
     {
         try
@@ -50,6 +65,10 @@ public class CodingAgent : IAgent
         }
     }
 
+    /// <summary>
+    /// Builds the prompt and streams LLM response tokens as they are generated.
+    /// Used by POST /api/chat/stream and POST /v1/chat/completions (stream:true).
+    /// </summary>
     public async IAsyncEnumerable<string> StreamAsync(AgentContext context)
     {
         var messages = await BuildMessagesAsync(context);
@@ -59,6 +78,11 @@ public class CodingAgent : IAgent
             yield return token;
     }
 
+    /// <summary>
+    /// Loads the appropriate prompt template from PostgreSQL and fills all placeholders
+    /// with the instruction rules, retrieved code chunks, user message, and detected language.
+    /// Falls back to a hardcoded default if no template is found.
+    /// </summary>
     private async Task<List<ChatMessage>> BuildMessagesAsync(AgentContext context)
     {
         var template = await _templates.GetByTaskTypeAsync(context.Intent.ToString(), context.CancellationToken);
@@ -91,7 +115,6 @@ public class CodingAgent : IAgent
         }
         else
         {
-            // Fallback when no template exists in DB yet
             systemPrompt = BuildFallbackSystemPrompt(instructionsText, contextChunksText);
             userMessage = context.UserMessage;
         }
@@ -103,6 +126,10 @@ public class CodingAgent : IAgent
         ];
     }
 
+    /// <summary>
+    /// Builds a basic system prompt when no database template is available.
+    /// Includes coding standards and code context if they were retrieved.
+    /// </summary>
     private static string BuildFallbackSystemPrompt(string instructions, string contextChunks)
     {
         var parts = new List<string>
@@ -116,16 +143,20 @@ public class CodingAgent : IAgent
         return string.Join("\n\n", parts);
     }
 
+    /// <summary>
+    /// Detects the dominant programming language from the retrieved code chunks
+    /// by finding the most frequently occurring language in the results.
+    /// Defaults to "C#" when no chunks were retrieved.
+    /// </summary>
     private static string DetectLanguage(AgentContext context)
     {
         if (context.RetrievedChunks.Count == 0) return "C#";
-        var langs = context.RetrievedChunks
+        return context.RetrievedChunks
             .Select(c => c.Language)
             .Where(l => !string.IsNullOrWhiteSpace(l))
             .GroupBy(l => l)
             .OrderByDescending(g => g.Count())
             .Select(g => g.Key)
-            .FirstOrDefault();
-        return langs ?? "C#";
+            .FirstOrDefault() ?? "C#";
     }
 }

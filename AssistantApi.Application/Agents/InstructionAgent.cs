@@ -6,6 +6,20 @@ using Microsoft.Extensions.Options;
 
 namespace AssistantApi.Application.Agents;
 
+/// <summary>
+/// Retrieves relevant coding standards and rules from the instruction-embeddings Qdrant collection.
+/// Always runs before any code generation to ensure the LLM follows team conventions.
+///
+/// Process:
+///   1. Build a task-specific search query based on the detected intent
+///      (e.g. "coding standards for code generation" vs "unit testing conventions")
+///   2. Embed the query via Ollama nomic-embed-text
+///   3. Search instruction-embeddings for the top 10 most relevant rules
+///   4. Populate AgentContext.InstructionRules for CodingAgent to inject into the system prompt
+///
+/// If no instruction files have been uploaded, the collection is empty and
+/// this step returns nothing — the LLM falls back to general best practices.
+/// </summary>
 public class InstructionAgent : IAgent
 {
     private readonly IOllamaClient _ollama;
@@ -27,11 +41,14 @@ public class InstructionAgent : IAgent
         _logger = logger;
     }
 
+    /// <summary>
+    /// Searches instruction-embeddings for rules relevant to the current task intent
+    /// and writes them into context.InstructionRules.
+    /// </summary>
     public async Task<AgentResult> ExecuteAsync(AgentContext context)
     {
         try
         {
-            // Build a task-specific query to retrieve the most relevant coding standards
             var query = BuildInstructionQuery(context);
 
             var vector = await _ollama.EmbedAsync(_options.EmbeddingModel, query, context.CancellationToken);
@@ -58,17 +75,17 @@ public class InstructionAgent : IAgent
         }
     }
 
-    private static string BuildInstructionQuery(AgentContext context)
-    {
-        // Build a targeted query based on intent so we get the most relevant rules
-        var intent = context.Intent.ToString();
-        return context.Intent switch
+    /// <summary>
+    /// Builds a task-specific search query so the most relevant coding rules
+    /// are retrieved for the current intent type.
+    /// </summary>
+    private static string BuildInstructionQuery(AgentContext context) =>
+        context.Intent switch
         {
-            AgentIntent.CodeGeneration => $"coding standards rules for generating {intent} code",
+            AgentIntent.CodeGeneration => "coding standards rules for generating code",
             AgentIntent.CodeReview => "code review rules quality standards forbidden patterns",
             AgentIntent.UnitTest => "unit testing standards test naming conventions mocking rules",
             AgentIntent.Documentation => "documentation standards xml doc comment conventions",
-            _ => $"general coding standards best practices {intent}"
+            _ => $"general coding standards best practices {context.Intent}"
         };
-    }
 }

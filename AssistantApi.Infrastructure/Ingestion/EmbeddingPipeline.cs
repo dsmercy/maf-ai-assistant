@@ -3,13 +3,21 @@ using Microsoft.Extensions.Logging;
 
 namespace AssistantApi.Infrastructure.Ingestion;
 
+/// <summary>
+/// Converts text chunks into vector embeddings and upserts them into a Qdrant collection.
+/// Uses the Ollama /api/embed batch endpoint to embed multiple chunks per HTTP call,
+/// significantly reducing ingestion time compared to one call per chunk.
+///
+/// Batch size is controlled by <see cref="EmbedBatchSize"/>. Failed batches are
+/// logged and skipped — partial indexing is better than aborting the entire job.
+/// </summary>
 public class EmbeddingPipeline
 {
     private readonly IOllamaClient _ollama;
     private readonly IVectorRepository _vectors;
     private readonly ILogger<EmbeddingPipeline> _logger;
 
-    // How many chunks to send to Ollama in one /api/embed call
+    /// <summary>Number of chunks sent to Ollama in a single /api/embed call.</summary>
     private const int EmbedBatchSize = 32;
 
     public EmbeddingPipeline(IOllamaClient ollama, IVectorRepository vectors, ILogger<EmbeddingPipeline> logger)
@@ -20,9 +28,13 @@ public class EmbeddingPipeline
     }
 
     /// <summary>
-    /// Embeds all items using Ollama batch embed, then upserts to Qdrant.
-    /// One /api/embed call per EmbedBatchSize chunks instead of one call per chunk.
+    /// Embeds all items in batches and upserts the resulting vectors into Qdrant.
+    /// Each item is a tuple of (pointId, textContent, metadataDictionary).
     /// </summary>
+    /// <param name="embeddingModel">Ollama model name to use for embedding (e.g. "nomic-embed-text").</param>
+    /// <param name="collection">Target Qdrant collection name (e.g. "code-embeddings").</param>
+    /// <param name="items">List of (Id, Text, Metadata) tuples to embed and store.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task EmbedAndUpsertAsync(
         string embeddingModel,
         string collection,

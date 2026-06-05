@@ -1,0 +1,289 @@
+================================================================================
+  ENTERPRISE LOCAL AI CODING ASSISTANT
+  The Simple Story of One Chat Request
+================================================================================
+  How a message travels from your browser to an AI response
+================================================================================
+
+
+OVERVIEW
+--------
+Every time you send a message to the AI Coding Assistant, your request passes
+through several layers of logic before the AI model ever sees it. This document
+explains each step in plain language.
+
+
+================================================================================
+STEP 1 — YOUR MESSAGE ARRIVES AT THE API
+================================================================================
+
+What happens:
+  You type a message and hit send. Open WebUI forwards it to:
+  POST http://assistant-api:5000/api/chat
+
+  The server receives:
+    - Your message text
+    - A conversation ID (ties messages in the same chat together)
+    - An optional repository filter (limit search to one repo)
+    - Your identity (extracted from your login token, or "anonymous")
+
+  Your message is immediately saved to PostgreSQL so there is always a
+  record that you asked something, even if the AI later fails to respond.
+
+Code location:
+  ChatController.Chat()           → AssistantApi/Controllers/ChatController.cs
+  ChatService.HandleAsync()       → AssistantApi.Application/Services/ChatService.cs
+  ConversationRepository          → AssistantApi.Infrastructure/Persistence/ConversationRepository.cs
+
+
+================================================================================
+STEP 2 — WHAT DO YOU ACTUALLY WANT? (Intent Classification)
+================================================================================
+
+What happens:
+  The OrchestratorAgent reads your message and classifies it into one of
+  seven intent categories by looking for keywords.
+
+  Keyword → Intent mapping:
+  ┌─────────────────────────────────────────────────────────┐
+  │ "unit test / xunit / nunit / moq"  →  UnitTest         │
+  │ "review / refactor / fix / improve" →  CodeReview       │
+  │ "generate / create / build / add"  →  CodeGeneration    │
+  │ "explain / what is / how does"     →  CodeExplanation   │
+  │ "document / xml doc / readme"      →  Documentation     │
+  │ "repository / file / class"        →  RepositoryQuestion│
+  │ (anything else)                    →  GeneralQuestion   │
+  └─────────────────────────────────────────────────────────┘
+
+  The detected intent controls what happens in the next two steps.
+
+Code location:
+  OrchestratorAgent.ClassifyIntent()  → AssistantApi.Application/Agents/OrchestratorAgent.cs
+
+
+================================================================================
+STEP 3 — FETCH YOUR CODING STANDARDS (Always runs)
+================================================================================
+
+What happens:
+  Before the AI generates anything, InstructionAgent runs.
+  It searches the instruction-embeddings collection in Qdrant for coding
+  rules that are relevant to your current task.
+
+  How it works:
+    1. Builds a task-specific search query based on the detected intent
+       e.g. "coding standards rules for generating code"
+    2. Converts that query into a 768-dimensional vector using nomic-embed-text
+    3. Searches Qdrant for the top 10 most similar instruction chunks
+    4. Returns the matching rules as plain text
+
+  Examples of rules it might retrieve:
+    - "Always use the repository pattern for data access"
+    - "Never write raw SQL in controllers"
+    - "All public methods must have XML documentation"
+    - "Use dependency injection — never use static classes"
+
+  These rules are later injected into the AI prompt so the model follows
+  your team's standards without you having to repeat them every time.
+
+  If no instruction files have been uploaded yet, this step returns nothing
+  and the AI falls back to general best practices.
+
+Code location:
+  InstructionAgent.ExecuteAsync()     → AssistantApi.Application/Agents/InstructionAgent.cs
+  OllamaClient.EmbedAsync()           → AssistantApi.Infrastructure/Ollama/OllamaClient.cs
+  QdrantVectorRepository.SearchAsync() → AssistantApi.Infrastructure/Qdrant/QdrantVectorRepository.cs
+
+
+================================================================================
+STEP 4 — FIND RELEVANT CODE FROM YOUR REPOS (Conditional)
+================================================================================
+
+What happens:
+  RepositoryAgent runs ONLY if your question involves code context.
+
+  Runs for:   CodeGeneration, CodeReview, CodeExplanation, RepositoryQuestion
+  Skipped for: UnitTest, Documentation, GeneralQuestion
+
+  When it runs:
+    1. Your message is converted into a 768-dimensional vector using
+       the nomic-embed-text embedding model via Ollama
+       POST http://ollama:11434/api/embeddings
+
+    2. Qdrant is searched for the top 5 most semantically similar code
+       chunks from all indexed repositories
+       (filtered by repository name if you specified one)
+
+    3. Each result comes back with:
+         - The actual code content
+         - The file path it came from
+         - The repository name
+         - A similarity score (0.0 to 1.0)
+
+  This is the RAG (Retrieval-Augmented Generation) step. It gives the AI
+  real code from your codebase to reason about, instead of guessing.
+
+  If no repositories are indexed yet, this step returns nothing and the AI
+  answers from general knowledge only. The "sources" array in the response
+  will be empty.
+
+Code location:
+  RepositoryAgent.ExecuteAsync()       → AssistantApi.Application/Agents/RepositoryAgent.cs
+  OllamaClient.EmbedAsync()            → AssistantApi.Infrastructure/Ollama/OllamaClient.cs
+  QdrantVectorRepository.SearchAsync() → AssistantApi.Infrastructure/Qdrant/QdrantVectorRepository.cs
+
+
+================================================================================
+STEP 5 — ASSEMBLE THE FINAL PROMPT
+================================================================================
+
+What happens:
+  CodingAgent takes everything collected so far and builds the prompt that
+  gets sent to the AI model.
+
+  The prompt has two parts:
+
+  SYSTEM MESSAGE (instructions to the AI):
+    ┌──────────────────────────────────────────────────────────────────┐
+    │ You are an expert software engineer.                             │
+    │                                                                  │
+    │ ## Coding Standards                                              │
+    │ 1. Always use repository pattern                                 │
+    │ 2. Never write SQL in controllers                                │
+    │ ... (from InstructionAgent)                                      │
+    │                                                                  │
+    │ ## Relevant Code Context                                         │
+    │ // File: src/Core/Interfaces/IUserRepository.cs                  │
+    │ public interface IUserRepository { ... }                         │
+    │ ... (from RepositoryAgent)                                       │
+    └──────────────────────────────────────────────────────────────────┘
+
+  USER MESSAGE:
+    ┌──────────────────────────────────────────────────────────────────┐
+    │ Generate a C# repository pattern for a User entity               │
+    └──────────────────────────────────────────────────────────────────┘
+
+  Prompt templates are loaded from the PostgreSQL prompt_templates table.
+  There is a different template for each intent type (CodeGeneration,
+  CodeReview, UnitTest, etc.) so the instructions are always appropriate
+  for the task. If no template is found, a built-in default is used.
+
+  The dominant programming language is auto-detected from the retrieved
+  code chunks and passed to the template as {language}.
+
+Code location:
+  CodingAgent.BuildMessagesAsync()        → AssistantApi.Application/Agents/CodingAgent.cs
+  PromptTemplateRepository.GetByTaskType() → AssistantApi.Infrastructure/Persistence/PromptTemplateRepository.cs
+
+
+================================================================================
+STEP 6 — ASK THE AI MODEL (Ollama)
+================================================================================
+
+What happens:
+  The assembled prompt is sent to qwen3-coder:30b running locally in Docker.
+
+  Request:
+    POST http://ollama:11434/api/chat
+    Body: { model: "qwen3-coder:30b", messages: [...], stream: false }
+
+  The model reads:
+    - Your coding standards
+    - The relevant code from your repository
+    - Your original question
+
+  Then generates a response.
+
+  Resilience settings (so slow models do not crash the request):
+    - Attempt timeout:  8 minutes per try
+    - Total timeout:   10 minutes overall
+    - Retry policy:    2 retries with 2 second delay on transient errors
+    - Circuit breaker: opens after repeated failures to protect the system
+
+  Typical response time: 30 seconds to 2 minutes depending on question length
+  and whether the model is already loaded in memory.
+
+Code location:
+  OllamaClient.ChatAsync()     → AssistantApi.Infrastructure/Ollama/OllamaClient.cs
+  DependencyInjection.cs       → AssistantApi.Infrastructure/DependencyInjection.cs
+
+
+================================================================================
+STEP 7 — SAVE AND RETURN THE RESPONSE
+================================================================================
+
+What happens:
+  The AI response is saved to PostgreSQL alongside your original question.
+  This builds up a full conversation history that persists across sessions.
+
+  The final response returned to the client contains:
+    - response      The AI-generated text
+    - intent        What the system understood you were asking for
+    - latencyMs     Total time taken from request to response
+    - sources[]     The code files retrieved from Qdrant that influenced
+                    the answer (empty if no repos are indexed)
+
+  Example response:
+    {
+      "conversationId": "test-1",
+      "response":       "public class UserRepository : IUserRepository { ... }",
+      "intent":         "CodeGeneration",
+      "latencyMs":      76163,
+      "sources": [
+        {
+          "filePath":   "src/Core/Interfaces/IUserRepository.cs",
+          "repository": "CleanArchitecture",
+          "score":      0.89
+        }
+      ]
+    }
+
+Code location:
+  ChatService.HandleAsync()        → AssistantApi.Application/Services/ChatService.cs
+  ConversationRepository           → AssistantApi.Infrastructure/Persistence/ConversationRepository.cs
+
+
+================================================================================
+COMPLETE COMPONENT SUMMARY
+================================================================================
+
+  Component                 Plain English Role
+  ─────────────────────────────────────────────────────────────────────────
+  ChatController            Entry point — receives HTTP request
+  ChatService               Coordinator — ties all steps together
+  OrchestratorAgent         Traffic cop — classifies intent, runs agents
+  InstructionAgent          Rule fetcher — retrieves coding standards
+  RepositoryAgent           Code searcher — finds relevant code via RAG
+  CodingAgent               Prompt builder — assembles and calls the AI
+  Ollama (qwen3-coder:30b)  AI brain — generates the actual response
+  Qdrant                    Vector search engine — for code and rules
+  PostgreSQL                Persistent store — conversations, jobs, config
+  nomic-embed-text          Embedding model — converts text to vectors
+
+
+================================================================================
+STREAMING VARIANT (/api/chat/stream)
+================================================================================
+
+  The same steps 1–6 apply. The difference is in Step 6:
+  Instead of waiting for the full response, tokens are streamed back as
+  Server-Sent Events (SSE) the moment the model produces them.
+
+  Each SSE event format:
+    data: {"token": "public"}
+    data: {"token": " class"}
+    data: {"token": " UserRepository"}
+    ...
+    data: [DONE]
+
+  This makes the UI feel responsive for long responses — you see words
+  appearing progressively rather than waiting for the full answer.
+
+  Open WebUI uses the OpenAI-compatible streaming endpoint:
+    POST /v1/chat/completions  (with stream: true)
+  Which wraps the same pipeline and formats tokens as OpenAI SSE chunks.
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================

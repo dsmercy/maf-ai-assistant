@@ -3,6 +3,17 @@ using System.Text.Json;
 
 namespace AssistantApi.Middleware;
 
+/// <summary>
+/// Global exception handling middleware that intercepts unhandled exceptions
+/// before they reach ASP.NET's default error handler.
+///
+/// Handles two cases:
+///   - FluentValidation.ValidationException → 400 Bad Request with field-level error details
+///   - Any other unhandled exception → 500 Internal Server Error with a generic message
+///
+/// Registered first in the middleware pipeline so it wraps all subsequent middleware
+/// including routing, authentication, and controller execution.
+/// </summary>
 public class ValidationExceptionMiddleware
 {
     private readonly RequestDelegate _next;
@@ -14,6 +25,9 @@ public class ValidationExceptionMiddleware
         _logger = logger;
     }
 
+    /// <summary>
+    /// Passes the request to the next middleware and catches exceptions on the way back.
+    /// </summary>
     public async Task InvokeAsync(HttpContext context)
     {
         try

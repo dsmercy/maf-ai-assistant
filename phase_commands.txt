@@ -89,3 +89,6 @@ How is dependency injection configured in this codebase? Show me the specific fi
 
 #Code generation using codebase patterns
 Generate a new repository class following the same pattern used in this codebase. The entity should be called "Product" with fields for Name, Price, and CategoryId.
+
+
+

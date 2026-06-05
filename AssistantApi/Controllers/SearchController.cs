@@ -5,6 +5,11 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace AssistantApi.Controllers;
 
+/// <summary>
+/// Provides direct semantic search against the Qdrant vector collections.
+/// Useful for testing whether repositories have been indexed correctly
+/// and for verifying that the RAG pipeline retrieves relevant results.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 public class SearchController : ControllerBase
@@ -26,6 +31,15 @@ public class SearchController : ControllerBase
         _config = config;
     }
 
+    /// <summary>
+    /// Embeds the query text and performs a cosine similarity search against the specified collection.
+    /// Supports optional filtering by repository name and programming language.
+    /// </summary>
+    /// <param name="q">The search query text.</param>
+    /// <param name="collection">Qdrant collection to search. One of: code-embeddings, doc-embeddings, instruction-embeddings.</param>
+    /// <param name="topK">Maximum number of results to return (1–20).</param>
+    /// <param name="repository">Optional: restrict results to a specific repository name.</param>
+    /// <param name="language">Optional: restrict results to a specific programming language.</param>
     [HttpGet]
     public async Task<ActionResult<SearchResponse>> Search(
         [FromQuery] string q = "",

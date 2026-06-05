@@ -4,6 +4,17 @@ using Microsoft.Extensions.Logging;
 
 namespace AssistantApi.Application.Agents;
 
+/// <summary>
+/// Entry point for the agent pipeline. Coordinates all other agents in the correct order.
+///
+/// Execution order for every request:
+///   1. ClassifyIntent — determine what the user wants
+///   2. InstructionAgent — always fetch coding standards from Qdrant
+///   3. RepositoryAgent — conditionally fetch relevant code from Qdrant
+///   4. CodingAgent — build the prompt and call the LLM
+///
+/// Also exposes StreamAsync for token-by-token streaming responses.
+/// </summary>
 public class OrchestratorAgent : IAgent
 {
     private readonly InstructionAgent _instructionAgent;
@@ -25,6 +36,10 @@ public class OrchestratorAgent : IAgent
         _logger = logger;
     }
 
+    /// <summary>
+    /// Runs the full agent pipeline and returns the complete response as a single string.
+    /// Used by POST /api/chat (non-streaming).
+    /// </summary>
     public async Task<AgentResult> ExecuteAsync(AgentContext context)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -32,14 +47,11 @@ public class OrchestratorAgent : IAgent
         context.Intent = ClassifyIntent(context.UserMessage);
         _logger.LogInformation("Intent={Intent} Conversation={ConversationId}", context.Intent, context.ConversationId);
 
-        // Step 1 — Always retrieve coding standards first
         await _instructionAgent.ExecuteAsync(context);
 
-        // Step 2 — Retrieve repository context for code-aware intents
         if (RequiresRepositoryContext(context.Intent))
             await _repositoryAgent.ExecuteAsync(context);
 
-        // Step 3 — Generate response
         var result = await _codingAgent.ExecuteAsync(context);
 
         sw.Stop();
@@ -48,6 +60,10 @@ public class OrchestratorAgent : IAgent
         return result;
     }
 
+    /// <summary>
+    /// Runs the agent pipeline and yields response tokens as they are produced by the LLM.
+    /// Used by POST /api/chat/stream and POST /v1/chat/completions (with stream:true).
+    /// </summary>
     public async IAsyncEnumerable<string> StreamAsync(AgentContext context)
     {
         context.Intent = ClassifyIntent(context.UserMessage);
@@ -62,6 +78,11 @@ public class OrchestratorAgent : IAgent
             yield return token;
     }
 
+    /// <summary>
+    /// Classifies the user's message into one of the AgentIntent categories
+    /// by searching for characteristic keywords. More specific intents are
+    /// checked before more general ones to avoid false matches.
+    /// </summary>
     private static AgentIntent ClassifyIntent(string message)
     {
         var lower = message.ToLowerInvariant();
@@ -85,6 +106,11 @@ public class OrchestratorAgent : IAgent
     private static bool ContainsAny(string text, params string[] keywords)
         => keywords.Any(text.Contains);
 
+    /// <summary>
+    /// Returns true if the classified intent should trigger a Qdrant search for repository context.
+    /// Intents that generate or analyze code benefit from real codebase context.
+    /// Intents like UnitTest or Documentation for new content do not need existing code.
+    /// </summary>
     private static bool RequiresRepositoryContext(AgentIntent intent) => intent is
         AgentIntent.CodeReview or
         AgentIntent.RepositoryQuestion or
