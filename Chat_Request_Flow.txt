@@ -287,3 +287,30 @@ STREAMING VARIANT (/api/chat/stream)
 ================================================================================
 END OF DOCUMENT
 ================================================================================
+
+
+
+==============================================================================
+instructions/
+  csharp/
+    01-architecture.md
+    02-ef-core.md
+    03-error-handling.md
+    04-async.md
+    05-testing.md
+    06-logging.md
+    07-api.md
+
+  typescript/
+    01-react.md
+    02-angular.md
+    03-async.md
+    04-testing.md
+
+  python/
+    01-patterns.md
+    02-testing.md
+
+  javascript/
+    01-node.md
+    02-async.md
