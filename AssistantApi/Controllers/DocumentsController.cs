@@ -2,7 +2,9 @@ using AssistantApi.Application.DTOs;
 using AssistantApi.Validators;
 using AssistantApi.Core.Entities;
 using AssistantApi.Core.Interfaces;
+using AssistantApi.Infrastructure.Ingestion;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace AssistantApi.Controllers;
 
@@ -16,13 +18,18 @@ namespace AssistantApi.Controllers;
 public class DocumentsController : ControllerBase
 {
     private readonly IMetadataRepository _metadata;
+    private readonly IngestionOptions _ingestion;
     private readonly ILogger<DocumentsController> _logger;
 
     private static readonly string[] AllowedDocExtensions = [".pdf", ".docx", ".md", ".txt"];
 
-    public DocumentsController(IMetadataRepository metadata, ILogger<DocumentsController> logger)
+    public DocumentsController(
+        IMetadataRepository metadata,
+        IOptions<IngestionOptions> ingestion,
+        ILogger<DocumentsController> logger)
     {
         _metadata = metadata;
+        _ingestion = ingestion.Value;
         _logger = logger;
     }
 
@@ -44,7 +51,7 @@ public class DocumentsController : ControllerBase
             return BadRequest(new { errors });
 
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        var uploadDir = "/data/uploads";
+        var uploadDir = _ingestion.UploadPath;
         Directory.CreateDirectory(uploadDir);
         var destPath = Path.Combine(uploadDir, $"{Guid.NewGuid()}{ext}");
 
@@ -53,9 +60,10 @@ public class DocumentsController : ControllerBase
 
         var job = new IngestionJob
         {
-            JobType = jobType,
-            Status = IngestionJobStatus.Queued,
-            SourcePath = destPath
+            JobType          = jobType,
+            Status           = IngestionJobStatus.Queued,
+            SourcePath       = destPath,
+            OriginalFileName = file.FileName
         };
         await _metadata.AddJobAsync(job, ct);
 

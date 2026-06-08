@@ -9,7 +9,7 @@
 
 OVERVIEW
 --------
-Six phases ordered from core infrastructure to enterprise features. Every phase
+Eight phases ordered from core infrastructure to enterprise features. Every phase
 ends with a working, testable milestone before the next phase begins. All Docker
 commands are the developer's responsibility — see Prerequisites_Commands.txt.
 
@@ -22,7 +22,8 @@ PHASE SUMMARY
   Phase 4  Agent Intelligence & Streaming     5-7 days
   Phase 5  Open WebUI Integration & Auth      5-7 days
   Phase 6  Enterprise Hardening               5-7 days
-  Phase 7  MCP Tool Integration               3-5 days
+  Phase 7  Continue.dev VS Code Extension     2-3 days
+  Phase 8  MCP Tool Integration               3-5 days
 
 
 --------------------------------------------------------------------------------
@@ -194,7 +195,7 @@ Estimated Duration: 5-7 Days
 GOALS
   Activate the agent stubs from Phase 2 with real logic. Wire Qdrant retrieval
   into the agent pipeline and connect Ollama for generation. Enable true token
-  streaming. MCP tool integration is deferred to Phase 7.
+  streaming. MCP tool integration is deferred to Phase 8.
 
 ORCHESTRATOR AGENT — FULL IMPLEMENTATION
   - Analyse incoming user message to classify intent
@@ -356,7 +357,86 @@ MILESTONE VERIFICATION
 
 
 --------------------------------------------------------------------------------
-PHASE 7 — MCP TOOL INTEGRATION
+PHASE 7 — CONTINUE.DEV VS CODE EXTENSION
+Estimated Duration: 2-3 Days
+--------------------------------------------------------------------------------
+
+GOALS
+  Integrate the AI coding assistant directly into VS Code via Continue.dev so
+  developers can use inline completions, chat, and slash commands without leaving
+  the editor. Our existing POST /v1/chat/completions OpenAI-compatible endpoint
+  is used as the Continue.dev provider — no new backend code required.
+
+WHAT CONTINUE.DEV PROVIDES
+  - Inline code completions (Tab to accept, triggered automatically while typing)
+  - Chat sidebar — ask questions about open files or selected code
+  - /edit command — apply AI suggestions directly to the current file
+  - /explain, /test, /review slash commands
+  - Context providers — open files, selected code, terminal output, codebase
+
+INTEGRATION APPROACH
+  Continue.dev supports custom OpenAI-compatible model providers. Wire our API
+  as the provider for both chat and autocomplete. No new endpoints needed.
+
+  Provider config points to:
+    Chat model   POST http://localhost:5000/v1/chat/completions
+    Model name   assistant-30b (production) or assistant-14b (local dev)
+
+DELIVERABLES
+  - continue-config/config.json   Shared Continue.dev config checked into repo
+  - Developer setup guide         Install extension, symlink or copy config
+  - Slash command mappings        /review → CodeReview intent, /test → UnitTest,
+                                  /explain → CodeExplanation
+  - Context providers configured  open-files, codebase, terminal
+
+CONTINUE.DEV CONFIG STRUCTURE (continue-config/config.json)
+  {
+    "models": [
+      {
+        "title": "AI Coding Assistant",
+        "provider": "openai",
+        "model": "assistant-30b",
+        "apiBase": "http://localhost:5000",
+        "apiKey": "none"
+      }
+    ],
+    "tabAutocompleteModel": {
+      "title": "AI Coding Assistant",
+      "provider": "openai",
+      "model": "assistant-30b",
+      "apiBase": "http://localhost:5000",
+      "apiKey": "none"
+    },
+    "contextProviders": [
+      { "name": "open-files" },
+      { "name": "codebase" },
+      { "name": "terminal" }
+    ],
+    "slashCommands": [
+      { "name": "review",  "description": "Review the selected code" },
+      { "name": "test",    "description": "Generate unit tests" },
+      { "name": "explain", "description": "Explain the selected code" }
+    ]
+  }
+
+DEVELOPER SETUP STEPS
+  1. Install Continue extension in VS Code (ID: Continue.continue)
+  2. Copy continue-config/config.json to ~/.continue/config.json
+     (or symlink: mklink /D %USERPROFILE%\.continue\config.json <repo>\continue-config\config.json)
+  3. Ensure assistant-api is running locally on port 5000
+  4. Open VS Code — Continue sidebar appears; select "AI Coding Assistant" model
+
+MILESTONE VERIFICATION
+  [ ] Continue sidebar connects to local API without errors
+  [ ] Sending a chat message in Continue triggers agent pipeline (check API logs)
+  [ ] Tab autocomplete suggests code from the assistant
+  [ ] /review slash command returns a code review response
+  [ ] /test slash command generates unit tests for selected code
+  [ ] Context from open files appears in the agent prompt
+
+
+--------------------------------------------------------------------------------
+PHASE 8 — MCP TOOL INTEGRATION
 Estimated Duration: 3-5 Days
 --------------------------------------------------------------------------------
 

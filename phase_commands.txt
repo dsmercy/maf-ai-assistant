@@ -60,12 +60,12 @@ docker compose build assistant-api ingestion-service
 docker compose up -d assistant-api ingestion-service
 
 //Then create the Qdrant collections (required before any indexing)
-curl -X PUT http://localhost:6333/collections/code-embeddings -H "Content-Type: application/json" -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
-curl -X PUT http://localhost:6333/collections/doc-embeddings -H "Content-Type: application/json" -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
-curl -X PUT http://localhost:6333/collections/instruction-embeddings -H "Content-Type: application/json" -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
+curl.exe -X PUT http://localhost:6333/collections/code-embeddings -H "Content-Type: application/json" -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
+curl.exe -X PUT http://localhost:6333/collections/doc-embeddings -H "Content-Type: application/json" -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
+curl.exe -X PUT http://localhost:6333/collections/instruction-embeddings -H "Content-Type: application/json" -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
 
 #upload a repository
-curl -X POST http://localhost:5000/api/repositories -H "Content-Type: application/json" -d "{\"url\": \"https://github.com/dotnet/samples\", \"branch\": \"main\"}"
+curl.exe -X POST http://localhost:5000/api/repositories -H "Content-Type: application/json" -d "{\"url\": \"https://github.com/dotnet/samples\", \"branch\": \"main\"}"
 #check status
 curl --location 'http://localhost:5000/api/repositories'
 #Check how many vectors are in Qdrant
@@ -92,3 +92,109 @@ Generate a new repository class following the same pattern used in this codebase
 
 
 
+##Upload instruction files
+General (7 files)
+
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\core-principles.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\security.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\testing.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\api-standards.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\observability.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\dependencies.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\database-safety.md"
+
+C# (10 files)
+
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\architecture.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\domain-modelling.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\cqrs-mediatr.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\ef-core.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\async-patterns.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\error-handling.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\code-quality.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\aspnetcore-api.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\testing.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\observability.md"
+
+Node.js / JavaScript (8 files)
+
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\architecture.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\express-standards.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\async-concurrency.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\error-handling.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\background-processing.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\configuration.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\database.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\testing.md"
+
+React / TypeScript (10 files)
+
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\architecture.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\api-layer.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\react-query.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\state-management.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\components.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\accessibility.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\performance.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\error-handling.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\testing.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\observability.md"
+
+Python (7 files)
+
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\architecture.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\fastapi-standards.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\async-patterns.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\error-handling.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\logging.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\agent-safety.md"
+curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\testing.md"
+
+Run all commands from the project root (c:\Projects\AI Projects\dotnet-agent\ai-coding-assistant).
+
+For a single new file added later, just run its specific command — e.g. if you add a new instructions\csharp\caching.md:
+
+# Delete jobs directly via psql
+docker exec -it postgres psql -U assistant -d assistant_db -c "DELETE FROM \"IngestionJobs\";"
+
+remove failed jobs:
+docker exec -it postgres psql -U assistant -d assistant_db -c "DELETE FROM \"IngestionJobs\" WHERE \"Status\" = 'Failed';"
+
+# Reusable pattern for any SQL
+"YOUR SQL HERE" | docker exec -i postgres psql -U assistant -d assistant_db
+
+# Examples:
+"DELETE FROM `"IngestionJobs`" WHERE `"Status`" = 'Failed';" | docker exec -i postgres psql -U assistant -d assistant_db
+"SELECT `"Status`", COUNT(*) FROM `"IngestionJobs`" GROUP BY `"Status`";" | docker exec -i postgres psql -U assistant -d assistant_db
+
+
+#delete existing instructions
+# Remove file hash records for instructions (RepositoryId = Guid.Empty)
+'DELETE FROM "FileHashes" WHERE "RepositoryId" = ''00000000-0000-0000-0000-000000000000'';' | docker exec -i postgres psql -U assistant -d assistant_db_dev
+
+
+##Build the custom models in Ollama
+
+docker exec ollama ollama pull qwen3-coder:14b
+
+# Copy Modelfiles into the Ollama container
+docker cp ollama/Modelfile.14b ollama:/tmp/Modelfile.14b
+docker cp ollama/Modelfile.30b ollama:/tmp/Modelfile.30b
+
+# Build custom models (named with -instruct suffix to distinguish from base)
+docker exec ollama ollama create assistant-14b -f /tmp/Modelfile.14b
+docker exec ollama ollama create assistant-30b -f /tmp/Modelfile.30b
+Step 3 — Update config to use the custom models
+
+appsettings.Development.json:
+
+
+"Assistant": {
+  "ChatModel": "assistant-14b"
+}
+appsettings.json (Docker/production):
+
+
+"Assistant": {
+  "ChatModel": "assistant-30b"
+}

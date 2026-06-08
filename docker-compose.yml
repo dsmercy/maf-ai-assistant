@@ -91,6 +91,7 @@ services:
       Ingestion__UploadPath: "/data/uploads"
     volumes:
       - repository-cache:/data/repository-cache
+      - uploads-data:/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,6 +115,7 @@ services:
     container_name: ingestion-service
     restart: unless-stopped
     environment:
+      DOTNET_ENVIRONMENT: Production
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
       Ollama__BaseUrl: "http://ollama:11434"
       Qdrant__Host: "qdrant"
@@ -122,6 +124,7 @@ services:
       Ingestion__UploadPath: "/data/uploads"
     volumes:
       - repository-cache:/data/repository-cache
+      - uploads-data:/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -159,6 +162,8 @@ volumes:
   openwebui-data:
     external: true
   repository-cache:
+    external: true
+  uploads-data:
     external: true
 
 networks:

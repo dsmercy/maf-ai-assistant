@@ -136,6 +136,25 @@ public class IngestionPipeline : IIngestionPipeline
 
         try
         {
+            // Deduplicate by content hash — skip re-embedding if the file hasn't changed.
+            // Guid.Empty is the sentinel repository ID for documents and instructions
+            // (they are not scoped to a repository).
+            var content = await File.ReadAllTextAsync(filePath, ct);
+            var newHash = ComputeHash(content);
+            var existing = await _fileHashes.GetAsync(Guid.Empty, fileName, ct);
+
+            if (existing is not null && existing.Hash == newHash)
+            {
+                _logger.LogInformation(
+                    "Skipping {FileName} — content unchanged (hash {Hash})", fileName, newHash);
+                job.Status = IngestionJobStatus.Completed;
+                job.ProcessedFiles = 0;
+                job.ErrorMessage = "Skipped — identical file already ingested.";
+                job.CompletedAt = DateTime.UtcNow;
+                await _metadata.UpdateJobAsync(job, ct);
+                return;
+            }
+
             var ext = Path.GetExtension(filePath);
             var parser = _parsers.FirstOrDefault(p => p.CanParse(ext))
                 ?? throw new InvalidOperationException($"No parser found for extension {ext}");
@@ -155,6 +174,15 @@ public class IngestionPipeline : IIngestionPipeline
             )).ToList();
 
             await _embedder.EmbedAndUpsertAsync(_options.EmbeddingModel, qdrantCollection, items, ct);
+
+            // Persist the new hash so subsequent identical uploads are skipped.
+            await _fileHashes.UpsertAsync(new FileHash
+            {
+                RepositoryId = Guid.Empty,
+                FilePath     = fileName,
+                Hash         = newHash,
+                ChunkCount   = chunks.Count
+            }, ct);
 
             job.Status = IngestionJobStatus.Completed;
             job.ProcessedFiles = 1;

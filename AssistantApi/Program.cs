@@ -27,6 +27,19 @@ builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configurati
 // Options
 builder.Services.Configure<AssistantOptions>(builder.Configuration.GetSection(AssistantOptions.SectionName));
 
+// Resolve relative ingestion paths against the application's content root so that
+// "data/uploads" becomes "<project-dir>/data/uploads" when running locally,
+// while absolute Docker paths like "/data/uploads" are left unchanged.
+// PostConfigure runs after all Configure calls (including AddInfrastructure) so it wins.
+builder.Services.PostConfigure<AssistantApi.Infrastructure.Ingestion.IngestionOptions>(opts =>
+{
+    var root = builder.Environment.ContentRootPath;
+    if (!Path.IsPathRooted(opts.UploadPath))
+        opts.UploadPath = Path.GetFullPath(Path.Combine(root, opts.UploadPath));
+    if (!Path.IsPathRooted(opts.RepositoryCachePath))
+        opts.RepositoryCachePath = Path.GetFullPath(Path.Combine(root, opts.RepositoryCachePath));
+});
+
 // Infrastructure (EF, Ollama, Qdrant)
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -161,11 +174,113 @@ builder.Services.AddOpenTelemetry()
 
 var app = builder.Build();
 
-// Auto-apply EF migrations on startup
+// Auto-apply EF migrations on startup and seed default feature flags.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AssistantApi.Infrastructure.Persistence.AssistantDbContext>();
     db.Database.EnsureCreated();
+
+    var flagRepo = scope.ServiceProvider.GetRequiredService<AssistantApi.Core.Interfaces.IFeatureFlagRepository>();
+    await SeedFlagIfMissingAsync(flagRepo, "code-embeddings", isEnabled: false,
+        "Source-code RAG — search code-embeddings collection. Disable when no repositories are indexed.");
+    await SeedFlagIfMissingAsync(flagRepo, "doc-embeddings",  isEnabled: true,
+        "Document RAG — search doc-embeddings collection for uploaded PDFs, DOCX, and Markdown.");
+    await SeedFlagIfMissingAsync(flagRepo, "streaming",       isEnabled: true,
+        "Enable token streaming on /api/chat/stream and /v1/chat/completions.");
+    //await SeedFlagIfMissingAsync(flagRepo, "rag",             isEnabled: true,
+    //    "Enable RAG retrieval via RepositoryAgent.");
+    await SeedFlagIfMissingAsync(flagRepo, "auth",            isEnabled: false,
+        "Enforce JWT authentication on all non-health endpoints.");
+    await SeedFlagIfMissingAsync(flagRepo, "audit",           isEnabled: true,
+        "Write all API requests to the audit_logs table.");
+    await SeedFlagIfMissingAsync(flagRepo, "rate-limit",      isEnabled: true,
+        "Apply rate limiting on POST /api/chat and ingestion endpoints.");
+
+    var templateRepo = scope.ServiceProvider.GetRequiredService<AssistantApi.Core.Interfaces.IPromptTemplateRepository>();
+    await SeedPromptTemplatesAsync(templateRepo);
+}
+
+static async Task SeedFlagIfMissingAsync(
+    AssistantApi.Core.Interfaces.IFeatureFlagRepository repo,
+    string name, bool isEnabled, string description)
+{
+    var all = await repo.GetAllAsync();
+    if (all.Any(f => f.Name == name)) return;
+    await repo.UpsertAsync(new AssistantApi.Core.Entities.FeatureFlag
+    {
+        Name        = name,
+        IsEnabled   = isEnabled,
+        Description = description
+    });
+}
+
+static async Task SeedPromptTemplatesAsync(AssistantApi.Core.Interfaces.IPromptTemplateRepository repo)
+{
+    var defaults = new[]
+    {
+        new AssistantApi.Core.Entities.PromptTemplate
+        {
+            Name               = "Code Generation",
+            TaskType           = "CodeGeneration",
+            SystemPrompt       = "You are an expert software engineer. Generate clean, production-ready code.\nFollow these coding standards strictly:\n{instructions}\n\nUse the following context from documentation as reference:\n{context_chunks}",
+            UserPromptTemplate = "Generate the following: {user_message}\n\nLanguage/Framework: {language}\nProvide complete, working code with no placeholders.",
+            IsActive           = true
+        },
+        new AssistantApi.Core.Entities.PromptTemplate
+        {
+            Name               = "Code Review",
+            TaskType           = "CodeReview",
+            SystemPrompt       = "You are a senior code reviewer. Review code for correctness, maintainability, and standards compliance.\nCoding standards to enforce:\n{instructions}\n\nRelevant context:\n{context_chunks}",
+            UserPromptTemplate = "Review the following: {user_message}\n\nIdentify: bugs, standards violations, improvements. Be specific and actionable.",
+            IsActive           = true
+        },
+        new AssistantApi.Core.Entities.PromptTemplate
+        {
+            Name               = "Unit Test Generation",
+            TaskType           = "UnitTest",
+            SystemPrompt       = "You are an expert in software testing. Generate comprehensive unit tests.\nTesting standards:\n{instructions}\n\nCode under test:\n{context_chunks}",
+            UserPromptTemplate = "Generate unit tests for: {user_message}\n\nLanguage: {language}\nInclude: arrange/act/assert, edge cases, meaningful test names.",
+            IsActive           = true
+        },
+        new AssistantApi.Core.Entities.PromptTemplate
+        {
+            Name               = "Documentation",
+            TaskType           = "Documentation",
+            SystemPrompt       = "You are a technical writer and software engineer. Generate clear documentation.\nDocumentation standards:\n{instructions}\n\nCode context:\n{context_chunks}",
+            UserPromptTemplate = "Generate documentation for: {user_message}\n\nInclude: purpose, parameters, return values, examples where appropriate.",
+            IsActive           = true
+        },
+        new AssistantApi.Core.Entities.PromptTemplate
+        {
+            Name               = "Code Explanation",
+            TaskType           = "CodeExplanation",
+            SystemPrompt       = "You are an expert software engineer. Explain code clearly and concisely.\nCoding standards for reference:\n{instructions}\n\nRelevant context:\n{context_chunks}",
+            UserPromptTemplate = "{user_message}\n\nExplain clearly. Reference specific lines or patterns where relevant.",
+            IsActive           = true
+        },
+        new AssistantApi.Core.Entities.PromptTemplate
+        {
+            Name               = "Repository Question",
+            TaskType           = "RepositoryQuestion",
+            SystemPrompt       = "You are an expert software engineer with full knowledge of this codebase.\nCoding standards:\n{instructions}\n\nRelevant context from the repository:\n{context_chunks}",
+            UserPromptTemplate = "{user_message}\n\nBase your answer on the provided context. Reference specific files and patterns.",
+            IsActive           = true
+        },
+        new AssistantApi.Core.Entities.PromptTemplate
+        {
+            Name               = "General Question",
+            TaskType           = "GeneralQuestion",
+            SystemPrompt       = "You are an expert software engineering assistant.\n{instructions}",
+            UserPromptTemplate = "{user_message}",
+            IsActive           = true
+        },
+    };
+
+    var existing = await repo.GetAllAsync();
+    var existingTaskTypes = existing.Select(t => t.TaskType).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var template in defaults.Where(t => !existingTaskTypes.Contains(t.TaskType)))
+        await repo.UpsertAsync(template);
 }
 
 app.UseMiddleware<ValidationExceptionMiddleware>();

@@ -106,13 +106,15 @@ public class Worker : BackgroundService
 
                 case IngestionJobType.Document:
                     await pipeline.IngestDocumentAsync(
-                        job.Id, job.SourcePath!, Path.GetFileName(job.SourcePath!),
+                        job.Id, job.SourcePath!,
+                        job.OriginalFileName ?? Path.GetFileName(job.SourcePath!),
                         DocumentCollection.Documents, ct);
                     break;
 
                 case IngestionJobType.InstructionFile:
                     await pipeline.IngestDocumentAsync(
-                        job.Id, job.SourcePath!, Path.GetFileName(job.SourcePath!),
+                        job.Id, job.SourcePath!,
+                        job.OriginalFileName ?? Path.GetFileName(job.SourcePath!),
                         DocumentCollection.Instructions, ct);
                     break;
             }

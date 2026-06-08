@@ -3,9 +3,11 @@ using AssistantApi.Application.Validators;
 using AssistantApi.Validators;
 using AssistantApi.Core.Entities;
 using AssistantApi.Core.Interfaces;
+using AssistantApi.Infrastructure.Ingestion;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 
 namespace AssistantApi.Controllers;
 
@@ -17,6 +19,7 @@ public class RepositoriesController : ControllerBase
     private readonly IVectorRepository _vectors;
     private readonly IFileHashRepository _fileHashes;
     private readonly IValidator<RegisterRepositoryRequest> _validator;
+    private readonly IngestionOptions _ingestion;
     private readonly ILogger<RepositoriesController> _logger;
 
     public RepositoriesController(
@@ -24,12 +27,14 @@ public class RepositoriesController : ControllerBase
         IVectorRepository vectors,
         IFileHashRepository fileHashes,
         IValidator<RegisterRepositoryRequest> validator,
+        IOptions<IngestionOptions> ingestion,
         ILogger<RepositoriesController> logger)
     {
         _metadata = metadata;
         _vectors = vectors;
         _fileHashes = fileHashes;
         _validator = validator;
+        _ingestion = ingestion.Value;
         _logger = logger;
     }
 
@@ -107,7 +112,7 @@ public class RepositoriesController : ControllerBase
             return BadRequest(new { errors });
 
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        var uploadDir = "/data/uploads";
+        var uploadDir = _ingestion.UploadPath;
         Directory.CreateDirectory(uploadDir);
         var destPath = Path.Combine(uploadDir, $"{Guid.NewGuid()}{ext}");
 

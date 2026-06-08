@@ -22,6 +22,9 @@ public class IngestionJob
     /// <summary>Filesystem path to the source file for upload-type jobs. Null for Git repository jobs.</summary>
     public string? SourcePath { get; set; }
 
+    /// <summary>Original filename as provided by the uploader. Used for deduplication — SourcePath uses a GUID temp name.</summary>
+    public string? OriginalFileName { get; set; }
+
     /// <summary>Number of files successfully parsed and embedded so far.</summary>
     public int ProcessedFiles { get; set; }
 
