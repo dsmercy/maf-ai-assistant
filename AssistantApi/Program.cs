@@ -132,6 +132,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 // });
 builder.Services.AddAuthorization();
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowVscodeWebview", policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod());
+});
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -286,6 +294,7 @@ static async Task SeedPromptTemplatesAsync(AssistantApi.Core.Interfaces.IPromptT
 
 app.UseMiddleware<ValidationExceptionMiddleware>();
 app.UseSerilogRequestLogging();
+app.UseCors("AllowVscodeWebview");
 app.UseRateLimiter();
 
 if (app.Environment.IsDevelopment())

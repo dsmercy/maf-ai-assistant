@@ -1,0 +1,25 @@
+# Source files — only ship compiled output
+src/**
+scripts/**
+tsconfig.json
+
+# GUI source — only ship gui/dist
+gui/src/**
+gui/node_modules/**
+gui/index.html
+gui/tsconfig.json
+gui/vite.config.ts
+gui/tailwind.config.js
+gui/postcss.config.js
+gui/package.json
+gui/package-lock.json
+
+# Dev dependencies / build artifacts
+node_modules/**
+.vscode/**
+.gitignore
+*.map
+
+# Editor / OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,97 @@
+{
+  "name": "ai-coding-assistant",
+  "displayName": "AI Coding Assistant",
+  "description": "Local AI coding assistant powered by Ollama + RAG pipeline",
+  "version": "0.2.0",
+  "publisher": "ai-coding-assistant",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["AI", "Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [{
+        "id": "ai-assistant-sidebar",
+        "title": "AI Assistant",
+        "icon": "$(hubot)"
+      }]
+    },
+    "views": {
+      "ai-assistant-sidebar": [{
+        "type": "webview",
+        "id": "ai-assistant.chatView",
+        "name": "Chat"
+      }]
+    },
+    "commands": [
+      { "command": "ai-assistant.focusChat",       "title": "AI Assistant: Open Chat" },
+      { "command": "ai-assistant.newConversation",  "title": "AI Assistant: New Conversation" },
+      { "command": "ai-assistant.switchModel",      "title": "AI Assistant: Switch Model" },
+      { "command": "ai-assistant.reviewCode",       "title": "AI Assistant: Review Code" },
+      { "command": "ai-assistant.explainCode",      "title": "AI Assistant: Explain Code" },
+      { "command": "ai-assistant.generateTests",    "title": "AI Assistant: Generate Tests" },
+      { "command": "ai-assistant.fixCode",          "title": "AI Assistant: Fix Code" },
+      { "command": "ai-assistant.documentCode",     "title": "AI Assistant: Document Code" }
+    ],
+    "keybindings": [
+      { "command": "ai-assistant.focusChat",      "key": "ctrl+l",         "mac": "cmd+l" },
+      { "command": "ai-assistant.newConversation","key": "ctrl+shift+n",   "mac": "cmd+shift+n", "when": "view.ai-assistant.chatView.visible" }
+    ],
+    "menus": {
+      "editor/context": [{
+        "submenu": "ai-assistant.submenu",
+        "group": "ai-assistant@1",
+        "when": "editorHasSelection"
+      }],
+      "ai-assistant.submenu": [
+        { "command": "ai-assistant.reviewCode",    "group": "1@1" },
+        { "command": "ai-assistant.explainCode",   "group": "1@2" },
+        { "command": "ai-assistant.generateTests", "group": "1@3" },
+        { "command": "ai-assistant.fixCode",       "group": "1@4" },
+        { "command": "ai-assistant.documentCode",  "group": "1@5" }
+      ]
+    },
+    "submenus": [{ "id": "ai-assistant.submenu", "label": "AI Assistant" }],
+    "configuration": {
+      "title": "AI Coding Assistant",
+      "properties": {
+        "aiAssistant.apiBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:5016",
+          "description": "Base URL of the AI Coding Assistant API"
+        },
+        "aiAssistant.model": {
+          "type": "string",
+          "default": "assistant-30b",
+          "enum": ["assistant-30b", "assistant-14b", "ai-assistant"],
+          "description": "Model to use for chat"
+        },
+        "aiAssistant.streamResponses": {
+          "type": "boolean",
+          "default": true,
+          "description": "Stream responses token by token"
+        },
+        "aiAssistant.autoAcceptEdits": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically apply AI file edits without confirmation"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/esbuild.js",
+    "build:gui": "cd gui && npm run build",
+    "watch": "node scripts/esbuild.js --watch",
+    "watch:gui": "cd gui && npm run dev",
+    "copy-gui": "node scripts/copy-gui.js",
+    "compile": "npm run build && npm run build:gui && npm run copy-gui",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.0"
+  }
+}

@@ -271,31 +271,31 @@ public class OpenAiController : ControllerBase
         var chunkId = $"chatcmpl-{Guid.NewGuid():N}";
         var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-        await WriteSseAsync(JsonSerializer.Serialize(new OpenAiStreamChunk
-        {
-            Id = chunkId, Created = created, Model = model,
-            Choices = [new() { Index = 0, Delta = new() { Role = "assistant" } }]
-        }), ct);
-
         try
         {
+            await WriteSseAsync(JsonSerializer.Serialize(new OpenAiStreamChunk
+            {
+                Id = chunkId, Created = created, Model = model,
+                Choices = [new() { Index = 0, Delta = new() { Role = "assistant" } }]
+            }), ct);
+
             await foreach (var token in _chatService.StreamAsync(request, userId, ct))
                 await WriteSseAsync(JsonSerializer.Serialize(new OpenAiStreamChunk
                 {
                     Id = chunkId, Created = created, Model = model,
                     Choices = [new() { Index = 0, Delta = new() { Content = token } }]
                 }), ct);
+
+            await WriteSseAsync(JsonSerializer.Serialize(new OpenAiStreamChunk
+            {
+                Id = chunkId, Created = created, Model = model,
+                Choices = [new() { Index = 0, Delta = new(), FinishReason = "stop" }]
+            }), ct);
+
+            await Response.WriteAsync("data: [DONE]\n\n", ct);
+            await Response.Body.FlushAsync(ct);
         }
         catch (OperationCanceledException) { }
-
-        await WriteSseAsync(JsonSerializer.Serialize(new OpenAiStreamChunk
-        {
-            Id = chunkId, Created = created, Model = model,
-            Choices = [new() { Index = 0, Delta = new(), FinishReason = "stop" }]
-        }), ct);
-
-        await Response.WriteAsync("data: [DONE]\n\n", ct);
-        await Response.Body.FlushAsync(ct);
     }
 
     // Responses API streaming — uses server-sent events with response.* event types
@@ -306,26 +306,22 @@ public class OpenAiController : ControllerBase
         var responseId = $"resp-{Guid.NewGuid():N}";
         var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-        // response.created
-        await WriteSseEventAsync("response.created", JsonSerializer.Serialize(new
-        {
-            type = "response.created",
-            response = new { id = responseId, @object = "response", created_at = created, model, status = "in_progress" }
-        }), ct);
-
-        // response.output_item.added
-        await WriteSseEventAsync("response.output_item.added", JsonSerializer.Serialize(new
-        {
-            type = "response.output_item.added",
-            output_index = 0,
-            item = new { type = "message", role = "assistant", content = Array.Empty<object>() }
-        }), ct);
-
         try
         {
-            int i = 0;
-            await foreach (var token in _chatService.StreamAsync(request, userId, ct))
+            await WriteSseEventAsync("response.created", JsonSerializer.Serialize(new
             {
+                type = "response.created",
+                response = new { id = responseId, @object = "response", created_at = created, model, status = "in_progress" }
+            }), ct);
+
+            await WriteSseEventAsync("response.output_item.added", JsonSerializer.Serialize(new
+            {
+                type = "response.output_item.added",
+                output_index = 0,
+                item = new { type = "message", role = "assistant", content = Array.Empty<object>() }
+            }), ct);
+
+            await foreach (var token in _chatService.StreamAsync(request, userId, ct))
                 await WriteSseEventAsync("response.output_text.delta", JsonSerializer.Serialize(new
                 {
                     type = "response.output_text.delta",
@@ -333,19 +329,16 @@ public class OpenAiController : ControllerBase
                     content_index = 0,
                     delta = token
                 }), ct);
-                i++;
-            }
+
+            await WriteSseEventAsync("response.completed", JsonSerializer.Serialize(new
+            {
+                type = "response.completed",
+                response = new { id = responseId, @object = "response", created_at = created, model, status = "completed" }
+            }), ct);
+
+            await Response.Body.FlushAsync(ct);
         }
         catch (OperationCanceledException) { }
-
-        // response.completed
-        await WriteSseEventAsync("response.completed", JsonSerializer.Serialize(new
-        {
-            type = "response.completed",
-            response = new { id = responseId, @object = "response", created_at = created, model, status = "completed" }
-        }), ct);
-
-        await Response.Body.FlushAsync(ct);
     }
 
     // Messages API streaming — uses Anthropic SSE event types
@@ -355,21 +348,21 @@ public class OpenAiController : ControllerBase
         SetSseHeaders();
         var messageId = $"msg_{Guid.NewGuid():N}";
 
-        await WriteSseEventAsync("message_start", JsonSerializer.Serialize(new
-        {
-            type = "message_start",
-            message = new { id = messageId, type = "message", role = "assistant", model, content = Array.Empty<object>(), stop_reason = (string?)null }
-        }), ct);
-
-        await WriteSseEventAsync("content_block_start", JsonSerializer.Serialize(new
-        {
-            type = "content_block_start",
-            index = 0,
-            content_block = new { type = "text", text = "" }
-        }), ct);
-
         try
         {
+            await WriteSseEventAsync("message_start", JsonSerializer.Serialize(new
+            {
+                type = "message_start",
+                message = new { id = messageId, type = "message", role = "assistant", model, content = Array.Empty<object>(), stop_reason = (string?)null }
+            }), ct);
+
+            await WriteSseEventAsync("content_block_start", JsonSerializer.Serialize(new
+            {
+                type = "content_block_start",
+                index = 0,
+                content_block = new { type = "text", text = "" }
+            }), ct);
+
             await foreach (var token in _chatService.StreamAsync(request, userId, ct))
                 await WriteSseEventAsync("content_block_delta", JsonSerializer.Serialize(new
                 {
@@ -377,18 +370,18 @@ public class OpenAiController : ControllerBase
                     index = 0,
                     delta = new { type = "text_delta", text = token }
                 }), ct);
+
+            await WriteSseEventAsync("content_block_stop", JsonSerializer.Serialize(new { type = "content_block_stop", index = 0 }), ct);
+            await WriteSseEventAsync("message_delta", JsonSerializer.Serialize(new
+            {
+                type = "message_delta",
+                delta = new { stop_reason = "end_turn", stop_sequence = (string?)null }
+            }), ct);
+            await WriteSseEventAsync("message_stop", JsonSerializer.Serialize(new { type = "message_stop" }), ct);
+
+            await Response.Body.FlushAsync(ct);
         }
         catch (OperationCanceledException) { }
-
-        await WriteSseEventAsync("content_block_stop", JsonSerializer.Serialize(new { type = "content_block_stop", index = 0 }), ct);
-        await WriteSseEventAsync("message_delta", JsonSerializer.Serialize(new
-        {
-            type = "message_delta",
-            delta = new { stop_reason = "end_turn", stop_sequence = (string?)null }
-        }), ct);
-        await WriteSseEventAsync("message_stop", JsonSerializer.Serialize(new { type = "message_stop" }), ct);
-
-        await Response.Body.FlushAsync(ct);
     }
 
     private void SetSseHeaders()

@@ -67,6 +67,14 @@ public class OpenAiToolResultMessage
 public class ParsedFileEdit
 {
     public string FilePath { get; set; } = string.Empty;
-    public string Content { get; set; } = string.Empty;
-    public bool IsNew { get; set; } = true;
+    public string Content  { get; set; } = string.Empty;
+    public bool   IsNew    { get; set; } = true;
+}
+
+// ── Well-known tool names ─────────────────────────────────────────────────────
+
+public static class ToolNames
+{
+    public const string CreateNewFile    = "create_new_file";
+    public const string EditExistingFile = "edit_existing_file";
 }

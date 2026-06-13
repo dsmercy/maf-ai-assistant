@@ -198,3 +198,7 @@ appsettings.json (Docker/production):
 "Assistant": {
   "ChatModel": "assistant-30b"
 }
+
+
+##run extension
+code --extensionDevelopmentPath="c:\Projects\AI Projects\dotnet-agent\ai-coding-assistant\vscode-extension"
