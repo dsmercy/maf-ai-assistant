@@ -357,82 +357,132 @@ MILESTONE VERIFICATION
 
 
 --------------------------------------------------------------------------------
-PHASE 7 — CONTINUE.DEV VS CODE EXTENSION
-Estimated Duration: 2-3 Days
+PHASE 7 — CUSTOM VS CODE EXTENSION
+Estimated Duration: 5-7 Days
 --------------------------------------------------------------------------------
 
 GOALS
-  Integrate the AI coding assistant directly into VS Code via Continue.dev so
-  developers can use inline completions, chat, and slash commands without leaving
-  the editor. Our existing POST /v1/chat/completions OpenAI-compatible endpoint
-  is used as the Continue.dev provider — no new backend code required.
+  Build a full-featured custom VS Code extension that integrates the AI coding
+  assistant directly into the editor with conversation management, file context,
+  direct file editing, plan review, and visual diff approval.
 
-WHAT CONTINUE.DEV PROVIDES
-  - Inline code completions (Tab to accept, triggered automatically while typing)
-  - Chat sidebar — ask questions about open files or selected code
-  - /edit command — apply AI suggestions directly to the current file
-  - /explain, /test, /review slash commands
-  - Context providers — open files, selected code, terminal output, codebase
+EXTENSION FEATURES
 
-INTEGRATION APPROACH
-  Continue.dev supports custom OpenAI-compatible model providers. Wire our API
-  as the provider for both chat and autocomplete. No new endpoints needed.
+  Chat & Conversation
+  - Chat sidebar (WebviewView) — streaming responses token by token via SSE
+  - Conversation history UI — list of past conversations in sidebar panel
+  - Resume previous conversations — click any conversation to continue it
+  - New conversation shortcut — Ctrl+Shift+N starts a fresh conversation
+  - Conversation stored in VS Code globalState (persists across sessions)
 
-  Provider config points to:
-    Chat model   POST http://localhost:5000/v1/chat/completions
-    Model name   assistant-30b (production) or assistant-14b (local dev)
+  Context Awareness
+  - Selected code context — active editor selection auto-attached to messages
+  - File uploads — attach any workspace file to a message via @ mention or button
+  - Context panel — shows exactly what files/code will be sent with the message
+  - Active file context — current open file always available as @currentFile
 
-DELIVERABLES
-  - continue-config/config.json   Shared Continue.dev config checked into repo
-  - Developer setup guide         Install extension, symlink or copy config
-  - Slash command mappings        /review → CodeReview intent, /test → UnitTest,
-                                  /explain → CodeExplanation
-  - Context providers configured  open-files, codebase, terminal
+  Code Editing
+  - Direct file editing — AI can propose edits to workspace files
+  - Plan review before execution — AI describes changes as a plan; user approves
+  - Auto-accept toggle — skip manual approval for low-risk changes
+  - Visual change review — diff view (before/after) before applying any edit
+  - Apply/Reject buttons per change block
 
-CONTINUE.DEV CONFIG STRUCTURE (continue-config/config.json)
-  {
-    "models": [
-      {
-        "title": "AI Coding Assistant",
-        "provider": "openai",
-        "model": "assistant-30b",
-        "apiBase": "http://localhost:5000",
-        "apiKey": "none"
-      }
-    ],
-    "tabAutocompleteModel": {
-      "title": "AI Coding Assistant",
-      "provider": "openai",
-      "model": "assistant-30b",
-      "apiBase": "http://localhost:5000",
-      "apiKey": "none"
-    },
-    "contextProviders": [
-      { "name": "open-files" },
-      { "name": "codebase" },
-      { "name": "terminal" }
-    ],
-    "slashCommands": [
-      { "name": "review",  "description": "Review the selected code" },
-      { "name": "test",    "description": "Generate unit tests" },
-      { "name": "explain", "description": "Explain the selected code" }
-    ]
-  }
+  Code Actions (right-click menu on selected code)
+  - Review Code, Explain Code, Generate Tests, Document Code, Refactor Code
 
-DEVELOPER SETUP STEPS
-  1. Install Continue extension in VS Code (ID: Continue.continue)
-  2. Copy continue-config/config.json to ~/.continue/config.json
-     (or symlink: mklink /D %USERPROFILE%\.continue\config.json <repo>\continue-config\config.json)
-  3. Ensure assistant-api is running locally on port 5000
-  4. Open VS Code — Continue sidebar appears; select "AI Coding Assistant" model
+  Model & Config
+  - Model switcher — toggle assistant-14b / assistant-30b from status bar
+  - Configurable API base URL via VS Code settings
+
+PROJECT STRUCTURE
+  vscode-extension/
+    src/
+      extension.ts          — activate(), registers all providers and commands
+      chatPanel.ts          — WebviewViewProvider: full chat sidebar UI
+      historyPanel.ts       — WebviewViewProvider: conversation history list
+      apiClient.ts          — SSE streaming client for /v1/chat/completions
+      commands.ts           — code action command handlers
+      conversationStore.ts  — read/write conversations in VS Code globalState
+      fileContext.ts        — resolve @ mentions, attach file content to messages
+      editProposal.ts       — parse AI edit blocks, open diff view, apply changes
+    package.json            — extension manifest, commands, menus, configuration
+    tsconfig.json
+
+COMMANDS REGISTERED
+  ai-assistant.openChat          Open chat sidebar              Ctrl+Shift+A
+  ai-assistant.newConversation   Start new conversation         Ctrl+Shift+N
+  ai-assistant.openHistory       Open conversation history      Ctrl+Shift+H
+  ai-assistant.reviewCode        Review selected code           Right-click menu
+  ai-assistant.generateTests     Generate unit tests            Right-click menu
+  ai-assistant.explainCode       Explain selected code          Right-click menu
+  ai-assistant.documentCode      Generate documentation         Right-click menu
+  ai-assistant.refactorCode      Refactor selected code         Right-click menu
+  ai-assistant.switchModel       Switch model (14b / 30b)       Status bar item
+  ai-assistant.attachFile        Attach file to next message    Chat toolbar button
+  ai-assistant.applyEdit         Apply a proposed file edit     Diff view button
+
+VS CODE SETTINGS
+  aiAssistant.apiBaseUrl         Default: http://localhost:5016
+  aiAssistant.model              Default: assistant-30b
+  aiAssistant.streamResponses    Default: true
+  aiAssistant.autoAcceptEdits    Default: false
+
+RUNNING LOCALLY (no publishing needed)
+  cd vscode-extension
+  npm install
+  Press F5 in VS Code — opens Extension Development Host with extension loaded
+
+TOOL-CALLING SUPPORT (GitHub Copilot agent file writing)
+  Problem: Copilot's createFile/editFiles tools only trigger when the LLM response
+  contains tool_calls JSON — plain text responses are ignored by the tool pipeline.
+
+  Solution: OpenAI function-calling protocol added to /v1/chat/completions:
+    1. Copilot sends request with tools[] array (createFile, editFiles, etc.)
+    2. ToolCallService parses the tools, builds a tool-aware prompt, calls the LLM
+    3. LLM response is parsed for ### File: blocks (our structured edit format)
+    4. Each file block is converted to a tool_call JSON object in the response
+    5. Copilot receives tool_calls and executes createFile/editFiles in the workspace
+    6. Copilot sends tool results back; next turn returns a plain assistant message
+
+  NEW FILES
+    AssistantApi.Application/Services/ToolCallService.cs
+      — detects tools[] in request, builds tool-aware system prompt
+      — parses LLM text response for ### File: blocks
+      — converts blocks to OpenAI tool_call format
+    AssistantApi.Application/DTOs/ToolCallDtos.cs
+      — OpenAiTool, OpenAiToolCall, OpenAiToolChoice, OpenAiToolResult DTOs
+      — updated OpenAiChatRequest with Tools and ToolChoice fields
+      — updated OpenAiChatResponse/Choice with ToolCalls field
+
+  FLOW
+    Request has tools[]  →  ToolCallService.HandleAsync()
+                               → builds tool-aware prompt (list available tools)
+                               → calls ChatService for LLM response
+                               → parses ### File: blocks from response
+                               → returns finish_reason="tool_calls" + tool_calls[]
+    No tools[]           →  normal ChatService.HandleAsync() (unchanged)
+
+    Tool result turn     →  tool results merged into conversation context
+                               → LLM called again for final confirmation message
+                               → returns finish_reason="stop"
 
 MILESTONE VERIFICATION
-  [ ] Continue sidebar connects to local API without errors
-  [ ] Sending a chat message in Continue triggers agent pipeline (check API logs)
-  [ ] Tab autocomplete suggests code from the assistant
-  [ ] /review slash command returns a code review response
-  [ ] /test slash command generates unit tests for selected code
-  [ ] Context from open files appears in the agent prompt
+  [ ] F5 opens Extension Development Host without errors
+  [ ] Chat sidebar opens and streams responses from local API
+  [ ] Selected code auto-attaches to message context
+  [ ] Attaching a file with @ includes its content in the prompt
+  [ ] Conversation list shows past conversations; clicking one resumes it
+  [ ] New conversation (Ctrl+Shift+N) starts a fresh thread
+  [ ] AI edit proposal opens diff view with Apply / Reject buttons
+  [ ] Applying edit writes changes directly to the workspace file
+  [ ] Auto-accept toggle skips diff review when enabled
+  [ ] Model switcher updates status bar and applies to next message
+  [ ] Right-click code actions all send selection to agent pipeline
+  [ ] Copilot custom model request with tools[] returns tool_calls response
+  [ ] Copilot createFile tool writes file to workspace from LLM response
+  [ ] Copilot editFiles tool applies patch to existing workspace file
+  [ ] Tool result turn returns a plain assistant confirmation message
 
 
 --------------------------------------------------------------------------------

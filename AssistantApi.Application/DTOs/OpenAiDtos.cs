@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace AssistantApi.Application.DTOs;
@@ -46,6 +47,12 @@ public class OpenAiChatRequest
 
     [JsonPropertyName("max_tokens")]
     public int? MaxTokens { get; set; }
+
+    [JsonPropertyName("tools")]
+    public List<OpenAiTool>? Tools { get; set; }
+
+    [JsonPropertyName("tool_choice")]
+    public object? ToolChoice { get; set; }
 }
 
 public class OpenAiMessage
@@ -54,7 +61,16 @@ public class OpenAiMessage
     public string Role { get; set; } = string.Empty;
 
     [JsonPropertyName("content")]
-    public string Content { get; set; } = string.Empty;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Content { get; set; } = string.Empty;
+
+    [JsonPropertyName("tool_call_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ToolCallId { get; set; }
+
+    [JsonPropertyName("tool_calls")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<OpenAiToolCall>? ToolCalls { get; set; }
 }
 
 public class OpenAiChatResponse
@@ -143,4 +159,146 @@ public class OpenAiStreamDelta
     [JsonPropertyName("content")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Content { get; set; }
+}
+
+// ── /v1/responses (OpenAI Responses API) ────────────────────────────────────
+
+public class OpenAiResponsesRequest
+{
+    [JsonPropertyName("model")]
+    public string Model { get; set; } = string.Empty;
+
+    [JsonPropertyName("input")]
+    public JsonElement Input { get; set; }  // string or array of message objects
+
+    [JsonPropertyName("stream")]
+    public bool Stream { get; set; } = false;
+
+    [JsonPropertyName("instructions")]
+    public string? Instructions { get; set; }
+
+    [JsonPropertyName("temperature")]
+    public double? Temperature { get; set; }
+
+    [JsonPropertyName("max_output_tokens")]
+    public int? MaxOutputTokens { get; set; }
+}
+
+public class OpenAiResponsesResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = $"resp-{Guid.NewGuid():N}";
+
+    [JsonPropertyName("object")]
+    public string Object { get; set; } = "response";
+
+    [JsonPropertyName("created_at")]
+    public long CreatedAt { get; set; } = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+    [JsonPropertyName("model")]
+    public string Model { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "completed";
+
+    [JsonPropertyName("output")]
+    public List<OpenAiResponseOutput> Output { get; set; } = [];
+
+    [JsonPropertyName("usage")]
+    public OpenAiUsage Usage { get; set; } = new();
+}
+
+public class OpenAiResponseOutput
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "message";
+
+    [JsonPropertyName("role")]
+    public string Role { get; set; } = "assistant";
+
+    [JsonPropertyName("content")]
+    public List<OpenAiResponseContent> Content { get; set; } = [];
+}
+
+public class OpenAiResponseContent
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "output_text";
+
+    [JsonPropertyName("text")]
+    public string Text { get; set; } = string.Empty;
+}
+
+// ── /v1/messages (Anthropic Messages API) ───────────────────────────────────
+
+public class AnthropicMessagesRequest
+{
+    [JsonPropertyName("model")]
+    public string Model { get; set; } = string.Empty;
+
+    [JsonPropertyName("messages")]
+    public List<AnthropicMessage> Messages { get; set; } = [];
+
+    [JsonPropertyName("system")]
+    public string? System { get; set; }
+
+    [JsonPropertyName("max_tokens")]
+    public int MaxTokens { get; set; } = 4096;
+
+    [JsonPropertyName("stream")]
+    public bool Stream { get; set; } = false;
+
+    [JsonPropertyName("temperature")]
+    public double? Temperature { get; set; }
+}
+
+public class AnthropicMessage
+{
+    [JsonPropertyName("role")]
+    public string Role { get; set; } = string.Empty;
+
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
+}
+
+public class AnthropicMessagesResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = $"msg_{Guid.NewGuid():N}";
+
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "message";
+
+    [JsonPropertyName("role")]
+    public string Role { get; set; } = "assistant";
+
+    [JsonPropertyName("model")]
+    public string Model { get; set; } = string.Empty;
+
+    [JsonPropertyName("content")]
+    public List<AnthropicContent> Content { get; set; } = [];
+
+    [JsonPropertyName("stop_reason")]
+    public string StopReason { get; set; } = "end_turn";
+
+    [JsonPropertyName("usage")]
+    public AnthropicUsage Usage { get; set; } = new();
+}
+
+public class AnthropicContent
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "text";
+
+    [JsonPropertyName("text")]
+    public string Text { get; set; } = string.Empty;
+}
+
+public class AnthropicUsage
+{
+    [JsonPropertyName("input_tokens")]
+    public int InputTokens { get; set; }
+
+    [JsonPropertyName("output_tokens")]
+    public int OutputTokens { get; set; }
 }

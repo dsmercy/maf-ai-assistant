@@ -49,6 +49,7 @@ builder.Services.AddScoped<InstructionAgent>();
 builder.Services.AddScoped<CodingAgent>();
 builder.Services.AddScoped<OrchestratorAgent>();
 builder.Services.AddScoped<ChatService>();
+builder.Services.AddScoped<ToolCallService>();
 
 // Validation
 builder.Services.AddValidatorsFromAssemblyContaining<ChatRequestValidator>();

@@ -32,36 +32,44 @@ public class ConversationRepository : IConversationRepository
         string conversationId, string userId, string role, string content,
         AgentIntent? intent = null, long? latencyMs = null, CancellationToken ct = default)
     {
-        Conversation? conversation = null;
+        Guid conversationGuid = Guid.TryParse(conversationId, out var parsed) ? parsed : Guid.NewGuid();
 
-        if (Guid.TryParse(conversationId, out var guid))
-            conversation = await _db.Conversations.Include(c => c.Messages)
-                .FirstOrDefaultAsync(c => c.Id == guid, ct);
+        Conversation? conversation = await _db.Conversations
+            .FirstOrDefaultAsync(c => c.Id == conversationGuid, ct);
 
         if (conversation is null)
         {
             conversation = new Conversation
             {
-                Id = Guid.TryParse(conversationId, out var parsedGuid) ? parsedGuid : Guid.NewGuid(),
-                UserId = userId,
+                Id        = conversationGuid,
+                UserId    = userId,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
             _db.Conversations.Add(conversation);
+            await _db.SaveChangesAsync(ct);
         }
 
-        conversation.Messages.Add(new ConversationMessage
+        var message = new ConversationMessage
         {
             ConversationId = conversation.Id,
-            Role = role,
-            Content = content,
+            Role           = role,
+            Content        = content,
             DetectedIntent = intent,
-            LatencyMs = latencyMs,
-            CreatedAt = DateTime.UtcNow
-        });
-        conversation.UpdatedAt = DateTime.UtcNow;
+            LatencyMs      = latencyMs,
+            CreatedAt      = DateTime.UtcNow
+        };
+        _db.ConversationMessages.Add(message);
+
+        // Update UpdatedAt via direct SQL to avoid optimistic concurrency conflicts
+        // when user and assistant messages are saved in rapid succession on the same conversation.
+        await _db.Conversations
+            .Where(c => c.Id == conversation.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.UpdatedAt, DateTime.UtcNow), ct);
 
         await _db.SaveChangesAsync(ct);
+
+        conversation.Messages.Add(message);
         return conversation;
     }
 }
