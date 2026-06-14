@@ -85,6 +85,9 @@ public class CodingAgent : IAgent
     /// </summary>
     private async Task<List<ChatMessage>> BuildMessagesAsync(AgentContext context)
     {
+        if (context.MessagesOverride is { Count: > 0 })
+            return context.MessagesOverride;
+
         var template = await _templates.GetByTaskTypeAsync(context.Intent.ToString(), context.CancellationToken);
 
         var language = DetectLanguage(context);

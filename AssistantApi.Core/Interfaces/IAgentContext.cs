@@ -43,6 +43,13 @@ public class AgentContext
     /// </summary>
     public string? RepositoryFilter { get; init; }
 
+    /// <summary>
+    /// When set, CodingAgent bypasses prompt-template assembly and passes these messages
+    /// directly to Ollama. Used when the caller (e.g. Continue) has already composed the
+    /// full message array including its own system prompt and tool instructions.
+    /// </summary>
+    public List<ChatMessage>? MessagesOverride { get; init; }
+
     /// <summary>Cancellation token propagated from the HTTP request.</summary>
     public CancellationToken CancellationToken { get; init; }
 }

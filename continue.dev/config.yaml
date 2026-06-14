@@ -1,0 +1,97 @@
+name: Local Profile
+version: 1.0.0
+
+models:
+  - name: AI Coding Assistant (30b)
+    provider: openai
+    model: assistant-30b
+    apiBase: http://127.0.0.1:5016/v1
+    apiKey: my_secret_32_char_secret_minimum
+
+  - name: AI Coding Assistant (14b)
+    provider: openai
+    model: assistant-14b
+    apiBase: http://127.0.0.1:5016/v1
+    apiKey: my_secret_32_char_secret_minimum
+
+  - name: Qwen 2.5 Coder 7b (Ollama)
+    provider: ollama
+    model: qwen-coder2.5-7b
+
+tabAutocompleteModel:
+  name: Autocomplete
+  provider: openai
+  model: assistant-30b
+  apiBase: http://localhost:5016
+  apiKey: my_secret_32_char_secret_minimum
+
+context:
+  - provider: code
+  - provider: docs
+  - provider: diff
+  - provider: terminal
+  - provider: problems
+  - provider: folder
+  - provider: codebase
+
+slashCommands:
+  - name: edit
+    description: Edit highlighted code
+  - name: comment
+    description: Write comments for the highlighted code
+  - name: share
+    description: Export the current chat session to markdown
+  - name: cmd
+    description: Generate a shell command
+  - name: commit
+    description: Generate a git commit message
+
+customCommands:
+  - name: review
+    description: "Code review — correctness, security, performance"
+    prompt: >-
+      Review the following code for correctness, security issues, performance
+      concerns, and adherence to clean code principles. Flag any CRITICAL issues
+      (breaking changes, security vulnerabilities, data loss risks) explicitly.
+      For each issue provide: severity (CRITICAL/HIGH/MEDIUM/LOW), the problem,
+      and a concrete fix.
+
+      {{{ input }}}
+
+  - name: test
+    description: "Generate unit tests with full coverage"
+    prompt: >-
+      Write unit tests for the following code using the appropriate test
+      framework (xUnit+Moq+FluentAssertions for C#, Vitest for
+      TypeScript/JavaScript, pytest for Python). Follow Arrange/Act/Assert
+      structure. Cover: happy path, error paths, edge cases, and validation
+      failures. One behaviour per test.
+
+      {{{ input }}}
+
+  - name: explain
+    description: "Explain selected code"
+    prompt: >-
+      Explain the following code clearly and concisely. Cover: what it does,
+      why it is structured this way, any non-obvious decisions, and potential
+      gotchas a developer should know before modifying it.
+
+      {{{ input }}}
+
+  - name: refactor
+    description: "Refactor for readability and simplicity"
+    prompt: >-
+      Refactor the following code to improve readability, reduce complexity,
+      and eliminate duplication — without changing external behaviour. Explain
+      each change and flag any risks.
+
+      {{{ input }}}
+
+  - name: document
+    description: "Generate XML/JSDoc documentation comments"
+    prompt: >-
+      Write XML doc comments (for C#) or JSDoc/docstring comments (for
+      TypeScript/Python) for the following code. Focus on the WHY and
+      non-obvious constraints — not just restating what the code already says.
+
+      {{{ input }}}

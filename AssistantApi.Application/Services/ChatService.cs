@@ -46,6 +46,7 @@ public class ChatService
             ConversationId = request.ConversationId,
             UserId = userId,
             RepositoryFilter = request.RepositoryFilter,
+            MessagesOverride = request.MessagesOverride,
             CancellationToken = ct
         };
 
@@ -92,6 +93,7 @@ public class ChatService
             ConversationId = request.ConversationId,
             UserId = userId,
             RepositoryFilter = request.RepositoryFilter,
+            MessagesOverride = request.MessagesOverride,
             CancellationToken = ct
         };
 

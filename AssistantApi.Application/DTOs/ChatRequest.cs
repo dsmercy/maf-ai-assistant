@@ -1,3 +1,5 @@
+using AssistantApi.Core.Interfaces;
+
 namespace AssistantApi.Application.DTOs;
 
 public class ChatRequest
@@ -6,6 +8,12 @@ public class ChatRequest
     public string ConversationId { get; set; } = string.Empty;
     public string? RepositoryFilter { get; set; }
     public bool Stream { get; set; } = false;
+
+    /// <summary>
+    /// When set, bypasses the agent's prompt-building pipeline and sends these messages
+    /// directly to the LLM. Used for pass-through requests from Continue.
+    /// </summary>
+    public List<ChatMessage>? MessagesOverride { get; set; }
 }
 
 public class ChatResponse

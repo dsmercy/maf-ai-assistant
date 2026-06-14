@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AssistantApi.Application.DTOs;
 using AssistantApi.Application.Services;
+using AssistantApi.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -116,12 +117,20 @@ public class OpenAiController : ControllerBase
             return;
         }
 
-        // Normal path
+        // Normal path — detect Continue's system-message tool protocol and pass messages through
+        var systemMessage = request.Messages.FirstOrDefault(m => m.Role == "system")?.Content ?? string.Empty;
+        var isContinueAgentRequest = systemMessage.Contains("<tool_use_instructions>", StringComparison.Ordinal);
+
         var chatRequest = new ChatRequest
         {
             Message        = userContent,
             ConversationId = conversationId,
-            Stream         = request.Stream
+            Stream         = request.Stream,
+            MessagesOverride = isContinueAgentRequest
+                ? request.Messages
+                    .Select(m => new ChatMessage(m.Role, m.Content ?? string.Empty))
+                    .ToList()
+                : null
         };
 
         if (request.Stream)
