@@ -35,46 +35,62 @@ public class EmbeddingPipeline
     /// <param name="collection">Target Qdrant collection name (e.g. "code-embeddings").</param>
     /// <param name="items">List of (Id, Text, Metadata) tuples to embed and store.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task EmbedAndUpsertAsync(
+    /// <summary>Embeds all items, upserts to Qdrant, and returns the vectors indexed by item position.</summary>
+    public async Task<IReadOnlyList<float[]>> EmbedAndReturnAsync(
         string embeddingModel,
         string collection,
         IReadOnlyList<(string Id, string Text, Dictionary<string, string> Metadata)> items,
         CancellationToken ct = default)
     {
-        if (items.Count == 0) return;
+        if (items.Count == 0) return [];
 
-        var batches = items.Chunk(EmbedBatchSize);
+        var allVectors = new float[items.Count][];
+        var batches    = items.Select((item, i) => (item, i)).Chunk(EmbedBatchSize);
 
         foreach (var batch in batches)
         {
             ct.ThrowIfCancellationRequested();
 
-            var batchList = batch.ToList();
-            var texts = batchList.Select(b => b.Text).ToList();
+            var texts = batch.Select(b => b.item.Text).ToList();
 
-            IReadOnlyList<float[]> vectors;
+            IReadOnlyList<float[]> batchVectors;
             try
             {
-                vectors = await _ollama.EmbedBatchAsync(embeddingModel, texts, ct);
+                batchVectors = await _ollama.EmbedBatchAsync(embeddingModel, texts, ct);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Batch embed failed for {Count} chunks, skipping batch", batchList.Count);
+                _logger.LogWarning(ex, "Batch embed failed for {Count} chunks, skipping batch", batch.Length);
+                foreach (var (_, i) in batch) allVectors[i] = [];
                 continue;
             }
 
-            var points = batchList
-                .Zip(vectors, (item, vector) => new VectorPoint
+            var points = batch
+                .Zip(batchVectors, (b, vector) =>
                 {
-                    Id = item.Id,
-                    Vector = vector,
-                    Content = item.Text,
-                    Metadata = item.Metadata
+                    allVectors[b.i] = vector;
+                    return new VectorPoint
+                    {
+                        Id       = b.item.Id,
+                        Vector   = vector,
+                        Content  = b.item.Text,
+                        Metadata = b.item.Metadata
+                    };
                 })
                 .ToList();
 
             await _vectors.UpsertBatchAsync(collection, points, ct);
             _logger.LogDebug("Embedded and upserted {Count} chunks to {Collection}", points.Count, collection);
         }
+
+        return allVectors;
     }
+
+    /// <summary>Embeds all items and upserts to Qdrant. Use EmbedAndReturnAsync when vectors are needed afterwards.</summary>
+    public async Task EmbedAndUpsertAsync(
+        string embeddingModel,
+        string collection,
+        IReadOnlyList<(string Id, string Text, Dictionary<string, string> Metadata)> items,
+        CancellationToken ct = default)
+        => await EmbedAndReturnAsync(embeddingModel, collection, items, ct);
 }

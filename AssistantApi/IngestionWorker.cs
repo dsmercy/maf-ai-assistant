@@ -5,42 +5,35 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace IngestionService;
+namespace AssistantApi;
 
 /// <summary>
-/// Background worker service that polls PostgreSQL for queued ingestion jobs
-/// and processes them one at a time.
+/// Background worker that polls PostgreSQL every 10 seconds for queued ingestion jobs
+/// and processes them one at a time inside the API process.
 ///
-/// On startup, any jobs stuck in "Running" state (from a previous crashed instance)
-/// are reset to "Queued" so they are retried automatically.
+/// Job types dispatched:
+///   GitRepository   → clone/fetch repo, parse, embed → code-embeddings
+///   ZipUpload       → extract archive, then same as GitRepository
+///   Document        → parse, embed → doc-embeddings
+///   InstructionFile → parse, embed, LLM-categorise → instruction-embeddings + DocumentTags
 ///
-/// The polling interval is 10 seconds. Each tick dequeues the oldest queued job
-/// and dispatches it to the appropriate ingestion handler based on job type:
-///   - GitRepository  → clone/fetch the repo, parse files, embed, upsert to Qdrant
-///   - ZipUpload      → extract the archive, then same as GitRepository
-///   - Document       → parse and embed into doc-embeddings
-///   - InstructionFile → parse and embed into instruction-embeddings
-///
-/// Each job runs in its own DI scope so DbContext and services are properly scoped.
+/// Runs in its own DI scope per job so DbContext is properly scoped.
+/// Stuck "Running" jobs from a previous crash are reset to "Queued" on startup.
 /// </summary>
-public class Worker : BackgroundService
+public class IngestionWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<Worker> _logger;
+    private readonly ILogger<IngestionWorker> _logger;
 
-    public Worker(IServiceScopeFactory scopeFactory, ILogger<Worker> logger)
+    public IngestionWorker(IServiceScopeFactory scopeFactory, ILogger<IngestionWorker> logger)
     {
         _scopeFactory = scopeFactory;
-        _logger = logger;
+        _logger       = logger;
     }
 
-    /// <summary>
-    /// Main worker loop. Resets stuck jobs on startup, then polls every 10 seconds
-    /// for new queued jobs and processes them.
-    /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("IngestionService worker started");
+        _logger.LogInformation("IngestionWorker started");
 
         using (var scope = _scopeFactory.CreateScope())
         {
@@ -60,33 +53,29 @@ public class Worker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unhandled error in ingestion worker loop");
+                _logger.LogError(ex, "Unhandled error in IngestionWorker loop");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
         }
 
-        _logger.LogInformation("IngestionService worker stopped");
+        _logger.LogInformation("IngestionWorker stopped");
     }
 
-    /// <summary>
-    /// Dequeues the next pending job from PostgreSQL and dispatches it to the
-    /// appropriate ingestion handler. Creates a new DI scope per job execution.
-    /// </summary>
     private async Task ProcessNextJobAsync(CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var metadata = scope.ServiceProvider.GetRequiredService<IMetadataRepository>();
-        var pipeline = scope.ServiceProvider.GetRequiredService<IIngestionPipeline>();
-        var cloner = scope.ServiceProvider.GetRequiredService<IRepositoryCloner>();
+        using var scope  = _scopeFactory.CreateScope();
+        var metadata     = scope.ServiceProvider.GetRequiredService<IMetadataRepository>();
+        var pipeline     = scope.ServiceProvider.GetRequiredService<IIngestionPipeline>();
+        var cloner       = scope.ServiceProvider.GetRequiredService<IRepositoryCloner>();
 
         var jobs = await metadata.GetQueuedJobsAsync(ct);
-        var job = jobs.FirstOrDefault();
+        var job  = jobs.FirstOrDefault();
         if (job is null) return;
 
-        _logger.LogInformation("Processing ingestion job {JobId} of type {JobType}", job.Id, job.JobType);
+        _logger.LogInformation("Processing ingestion job {JobId} ({JobType})", job.Id, job.JobType);
 
-        job.Status = IngestionJobStatus.Running;
+        job.Status    = IngestionJobStatus.Running;
         job.StartedAt = DateTime.UtcNow;
         await metadata.UpdateJobAsync(job, ct);
 
@@ -122,18 +111,13 @@ public class Worker : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Ingestion job {JobId} failed", job.Id);
-            job.Status = IngestionJobStatus.Failed;
+            job.Status       = IngestionJobStatus.Failed;
             job.ErrorMessage = ex.Message;
-            job.CompletedAt = DateTime.UtcNow;
+            job.CompletedAt  = DateTime.UtcNow;
             await metadata.UpdateJobAsync(job, ct);
         }
     }
 
-    /// <summary>
-    /// Handles a GitRepository job: clones or fetches the repo via LibGit2Sharp,
-    /// updates the repository status, then delegates to IngestionPipeline for
-    /// parsing, embedding, and Qdrant upsert.
-    /// </summary>
     private static async Task ProcessGitJobAsync(
         IngestionJob job,
         IMetadataRepository metadata,
@@ -147,12 +131,12 @@ public class Worker : BackgroundService
         var localPath = await cloner.CloneOrFetchAsync(repo.Url, repo.Branch, repo.Pat, ct);
 
         repo.LocalPath = localPath;
-        repo.Status = IndexingStatus.Indexing;
+        repo.Status    = IndexingStatus.Indexing;
         await metadata.UpdateRepositoryAsync(repo, ct);
 
         await pipeline.IngestRepositoryAsync(job.Id, repo.Id, localPath, repo.Name, repo.Branch, ct);
 
-        repo.Status = IndexingStatus.Completed;
+        repo.Status        = IndexingStatus.Completed;
         repo.LastIndexedAt = DateTime.UtcNow;
         await metadata.UpdateRepositoryAsync(repo, ct);
     }

@@ -24,6 +24,8 @@ public static class DependencyInjection
         services.AddScoped<IConversationRepository, ConversationRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IFeatureFlagRepository, FeatureFlagRepository>();
+        services.AddScoped<IDocumentTagRepository, DocumentTagRepository>();
+        services.AddSingleton<ITagVocabularyCache, TagVocabularyCache>();
 
         // Ollama
         var ollamaOptions = configuration.GetSection(OllamaOptions.SectionName).Get<OllamaOptions>()

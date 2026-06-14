@@ -3,5 +3,4 @@
   <Project Path="AssistantApi.Core/AssistantApi.Core.csproj" />
   <Project Path="AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj" />
   <Project Path="AssistantApi/AssistantApi.csproj" />
-  <Project Path="IngestionService/IngestionService.csproj" />
 </Solution>

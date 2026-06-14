@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using AssistantApi.Core.Entities;
 using AssistantApi.Core.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,9 @@ public class IngestionPipeline : IIngestionPipeline
     private readonly IVectorRepository _vectors;
     private readonly IEnumerable<IDocumentParser> _parsers;
     private readonly EmbeddingPipeline _embedder;
+    private readonly IOllamaClient _ollama;
+    private readonly IDocumentTagRepository _documentTags;
+    private readonly ITagVocabularyCache _tagCache;
     private readonly AssistantOptions _options;
     private readonly ILogger<IngestionPipeline> _logger;
 
@@ -28,16 +32,22 @@ public class IngestionPipeline : IIngestionPipeline
         IVectorRepository vectors,
         IEnumerable<IDocumentParser> parsers,
         EmbeddingPipeline embedder,
+        IOllamaClient ollama,
+        IDocumentTagRepository documentTags,
+        ITagVocabularyCache tagCache,
         IOptions<AssistantOptions> options,
         ILogger<IngestionPipeline> logger)
     {
-        _metadata = metadata;
-        _fileHashes = fileHashes;
-        _vectors = vectors;
-        _parsers = parsers;
-        _embedder = embedder;
-        _options = options.Value;
-        _logger = logger;
+        _metadata     = metadata;
+        _fileHashes   = fileHashes;
+        _vectors      = vectors;
+        _parsers      = parsers;
+        _embedder     = embedder;
+        _ollama       = ollama;
+        _documentTags = documentTags;
+        _tagCache     = tagCache;
+        _options      = options.Value;
+        _logger       = logger;
     }
 
     public async Task IngestRepositoryAsync(
@@ -173,7 +183,37 @@ public class IngestionPipeline : IIngestionPipeline
                 Metadata: BuildDocMetadata(c.Metadata, fileName, collection)
             )).ToList();
 
-            await _embedder.EmbedAndUpsertAsync(_options.EmbeddingModel, qdrantCollection, items, ct);
+            // Embed and get vectors back so we can reuse them during the tag enrichment upsert below.
+            var vectors = await _embedder.EmbedAndReturnAsync(_options.EmbeddingModel, qdrantCollection, items, ct);
+
+            // For instruction documents, auto-categorise each chunk and persist tags to DB.
+            // Re-upsert each point with the original vector + enriched language/category metadata.
+            if (collection == DocumentCollection.Instructions)
+            {
+                await _documentTags.DeleteBySourceFileAsync(fileName, ct);
+                foreach (var (item, vector) in items.Zip(vectors))
+                {
+                    var tag = await CategoriseChunkAsync(item.Text, item.Id, fileName, ct);
+                    if (tag is not null)
+                    {
+                        await _vectors.UpsertAsync(qdrantCollection, new VectorPoint
+                        {
+                            Id       = item.Id,
+                            Vector   = vector,
+                            Content  = item.Text,
+                            Metadata = new Dictionary<string, string>(item.Metadata)
+                            {
+                                ["language"] = tag.Language,
+                                ["category"] = tag.Category,
+                                ["keywords"] = tag.Keywords,
+                            }
+                        }, ct);
+                        await _documentTags.UpsertAsync(tag, ct);
+                    }
+                }
+                _tagCache.Invalidate();
+                _logger.LogInformation("Categorised and tagged {Count} instruction chunks from {File}", items.Count, fileName);
+            }
 
             // Persist the new hash so subsequent identical uploads are skipped.
             await _fileHashes.UpsertAsync(new FileHash
@@ -288,4 +328,60 @@ public class IngestionPipeline : IIngestionPipeline
     }
 
     private record ParsedFile(string RelativePath, string Hash, IReadOnlyList<ParsedChunk> Chunks);
+
+    /// <summary>
+    /// Asks the LLM to classify a single instruction chunk and return structured JSON.
+    /// Returns null if the LLM call fails or produces unparseable output — the chunk
+    /// is still indexed in Qdrant, just without dynamic tags.
+    /// </summary>
+    private async Task<DocumentTag?> CategoriseChunkAsync(
+        string chunkText, string pointId, string sourceFile, CancellationToken ct)
+    {
+        const string systemPrompt =
+            "You are a document classifier. Analyse the given text and return ONLY valid JSON " +
+            "with these fields: language (string), category (string), keywords (comma-separated string), summary (max 100 chars string). " +
+            "No markdown, no explanation, no code fences. Example: " +
+            "{\"language\":\"csharp\",\"category\":\"ef-core\",\"keywords\":\"AsNoTracking,N+1,migration\",\"summary\":\"EF Core query performance rules\"}";
+
+        var userPrompt = $"Classify this instruction document chunk:\n\n{chunkText[..Math.Min(chunkText.Length, 1500)]}";
+
+        try
+        {
+            var messages = new List<ChatMessage>
+            {
+                new("system", systemPrompt),
+                new("user", userPrompt)
+            };
+
+            var response = await _ollama.ChatAsync(_options.ChatModel, messages, ct);
+            var trimmed  = response.Trim().TrimStart('`').TrimEnd('`');
+
+            // Strip markdown code fences if the model added them despite instructions
+            if (trimmed.StartsWith("json", StringComparison.OrdinalIgnoreCase))
+                trimmed = trimmed[4..].Trim();
+
+            using var doc = JsonDocument.Parse(trimmed);
+            var root = doc.RootElement;
+
+            var language = root.TryGetProperty("language", out var l) ? l.GetString() ?? "general" : "general";
+            var category = root.TryGetProperty("category", out var c) ? c.GetString() ?? "general" : "general";
+            var keywords = root.TryGetProperty("keywords", out var k) ? k.GetString() ?? string.Empty : string.Empty;
+            var summary  = root.TryGetProperty("summary",  out var s) ? s.GetString() ?? string.Empty : string.Empty;
+
+            return new DocumentTag
+            {
+                Language   = language.ToLowerInvariant(),
+                Category   = category.ToLowerInvariant(),
+                Keywords   = keywords,
+                Summary    = summary,
+                PointId    = pointId,
+                SourceFile = sourceFile,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "CategoriseChunkAsync failed for point {PointId} in {File} — skipping tag", pointId, sourceFile);
+            return null;
+        }
+    }
 }

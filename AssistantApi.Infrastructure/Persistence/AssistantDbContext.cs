@@ -15,6 +15,7 @@ public class AssistantDbContext : DbContext
     public DbSet<FeatureFlag> FeatureFlags => Set<FeatureFlag>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
+    public DbSet<DocumentTag> DocumentTags => Set<DocumentTag>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -81,6 +82,19 @@ public class AssistantDbContext : DbContext
             e.HasKey(f => f.Id);
             e.Property(f => f.Name).IsRequired().HasMaxLength(128);
             e.HasIndex(f => f.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<DocumentTag>(e =>
+        {
+            e.HasKey(t => t.Id);
+            e.Property(t => t.Language).IsRequired().HasMaxLength(64);
+            e.Property(t => t.Category).IsRequired().HasMaxLength(128);
+            e.Property(t => t.Keywords).HasMaxLength(1024);
+            e.Property(t => t.Summary).HasMaxLength(512);
+            e.Property(t => t.PointId).IsRequired().HasMaxLength(64);
+            e.Property(t => t.SourceFile).IsRequired().HasMaxLength(512);
+            e.HasIndex(t => t.PointId).IsUnique();
+            e.HasIndex(t => new { t.Language, t.Category });
         });
     }
 }

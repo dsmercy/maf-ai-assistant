@@ -1,0 +1,183 @@
+## Test: Dynamic Instruction Tagging Flow
+##
+## Upload file → LLM detects tags → saved to Qdrant + PostgreSQL
+## Chat query  → tag vocabulary fetched → Qdrant filtered search using dynamic tags
+##
+## Expected timing per query (cache warm):
+##   Tag vocabulary fetch (cache hit) :   ~0ms
+##   Query embed                       :  ~50ms
+##   Cosine similarity match           :   ~5ms
+##   Qdrant filtered search            :  ~20ms
+##   LLM response generation           : 3–15s
+
+# ─────────────────────────────────────────────────────────────
+# Step 1 — Start the API
+# ─────────────────────────────────────────────────────────────
+# Run AssistantApi. Confirm these startup log lines appear:
+#   [INF] Executed DbCommand ... SELECT "MigrationId"   <- migrations applied/skipped
+#   [INF] IngestionWorker started
+#
+# Verify Qdrant collections exist (created automatically on startup if missing):
+curl http://localhost:6333/collections
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 2 — Clear existing instruction data (fresh test)
+# ─────────────────────────────────────────────────────────────
+docker exec postgres psql -U assistant -d assistant_db_dev -c "DELETE FROM \"DocumentTags\";"
+docker exec postgres psql -U assistant -d assistant_db_dev -c "DELETE FROM \"FileHashes\" WHERE \"RepositoryId\" = '00000000-0000-0000-0000-000000000000';"
+docker exec postgres psql -U assistant -d assistant_db_dev -c "DELETE FROM \"IngestionJobs\";"
+
+# Delete and recreate the instruction-embeddings Qdrant collection (removes old vectors)
+curl -s -X DELETE http://localhost:6333/collections/instruction-embeddings
+
+# Recreate manually (or restart the API to auto-create via EnsureQdrantCollectionAsync):
+curl -s -X PUT http://localhost:6333/collections/instruction-embeddings \
+  -H "Content-Type: application/json" \
+  -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 3 — Upload an instruction file
+# ─────────────────────────────────────────────────────────────
+# Replace <path-to-file> with your coding standards file (.md, .txt, .pdf, .docx)
+curl -s -X POST http://localhost:5016/api/documents/instructions \
+  -H "Authorization: Bearer my_secret_32_char_secret_minimum" \
+  -F "file=@<path-to-file>"
+
+# Expected response:
+#   { "jobId": "...", "fileName": "...", "status": "Queued" }
+# Save the jobId for Step 4.
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 4 — Poll until ingestion completes (~10–60s depending on file size)
+# ─────────────────────────────────────────────────────────────
+# Replace {jobId} with the value from Step 3
+curl -s http://localhost:5016/api/documents/jobs/{jobId} \
+  -H "Authorization: Bearer my_secret_32_char_secret_minimum"
+
+# Expected: "status": "Completed"
+# API log should show:
+#   Processing ingestion job ... (InstructionFile)
+#   Categorised and tagged N instruction chunks from <filename>
+#   TagVocabularyCache invalidated
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 5 — Verify PostgreSQL has DocumentTag rows
+# ─────────────────────────────────────────────────────────────
+docker exec postgres psql -U assistant -d assistant_db_dev \
+  -c "SELECT \"Language\", \"Category\", \"Keywords\", \"Summary\", \"SourceFile\" FROM \"DocumentTags\" ORDER BY \"Id\";"
+
+# Expected: rows with auto-detected language/category/keywords per chunk
+# Example:
+#  csharp | ef-core | AsNoTracking,migration,DbContext | EF Core query performance rules | standards.md
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 6 — Verify Qdrant vectors have enriched metadata
+# ─────────────────────────────────────────────────────────────
+curl -s -X POST http://localhost:6333/collections/instruction-embeddings/points/scroll \
+  -H "Content-Type: application/json" \
+  -d "{\"limit\": 3, \"with_payload\": true, \"with_vector\": false}"
+
+# Expected: each point payload contains "language" and "category" fields
+# alongside "_content", "source", "collection_type"
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 7 — Send a chat query and watch dynamic tag matching
+# ─────────────────────────────────────────────────────────────
+curl -s -X POST http://localhost:5016/api/chat \
+  -H "Authorization: Bearer my_secret_32_char_secret_minimum" \
+  -H "Content-Type: application/json" \
+  -d "{\"message\": \"what are the EF Core coding standards I should follow?\", \"conversationId\": \"test-001\"}"
+
+# Watch API logs for this sequence:
+#   [INF] TagVocabularyCache rebuilt — N entries       <- first query builds cache from DB
+#   [INF] InstructionAgent: matched 2 tags for query [...]: csharp/ef-core:0.72, csharp/general:0.41
+#   [INF] InstructionAgent retrieved 3 rules for conversation test-001
+#
+# On second query (cache already warm):
+#   TagVocabularyCache is silent (0ms, no rebuild log)
+#   InstructionAgent: matched ... (same result, faster)
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 8 — Test with a different intent to verify tag switching
+# ─────────────────────────────────────────────────────────────
+curl -s -X POST http://localhost:5016/api/chat \
+  -H "Authorization: Bearer my_secret_32_char_secret_minimum" \
+  -H "Content-Type: application/json" \
+  -d "{\"message\": \"write unit tests for a C# service class\", \"conversationId\": \"test-002\"}"
+
+# Logs should show different tags matched vs Step 7
+# e.g. csharp/testing instead of csharp/ef-core
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 9 — Test feature flag toggle
+# ─────────────────────────────────────────────────────────────
+# Disable instruction-embeddings — InstructionAgent should be skipped entirely
+curl -s -X PUT "http://localhost:5016/api/admin/feature-flags/instruction-embeddings" \
+  -H "Authorization: Bearer my_secret_32_char_secret_minimum" \
+  -H "Content-Type: application/json" \
+  -d "{\"isEnabled\": false}"
+
+# Re-send a query
+curl -s -X POST http://localhost:5016/api/chat \
+  -H "Authorization: Bearer my_secret_32_char_secret_minimum" \
+  -H "Content-Type: application/json" \
+  -d "{\"message\": \"what are the EF Core coding standards I should follow?\", \"conversationId\": \"test-003\"}"
+
+# Log should show:
+#   InstructionAgent skipped — instruction-embeddings feature flag is disabled
+
+# Re-enable when done
+curl -s -X PUT "http://localhost:5016/api/admin/feature-flags/instruction-embeddings" \
+  -H "Authorization: Bearer my_secret_32_char_secret_minimum" \
+  -H "Content-Type: application/json" \
+  -d "{\"isEnabled\": true}"
+
+
+# ─────────────────────────────────────────────────────────────
+# Step 10 — Test cache invalidation on re-upload
+# ─────────────────────────────────────────────────────────────
+# Upload a second or updated instruction file
+curl -s -X POST http://localhost:5016/api/documents/instructions \
+  -H "Authorization: Bearer my_secret_32_char_secret_minimum" \
+  -F "file=@<path-to-another-file>"
+
+# After ingestion completes, log should show:
+#   TagVocabularyCache invalidated
+# On the next chat query:
+#   TagVocabularyCache rebuilt — N entries   <- N is now larger (includes new file's tags)
+
+
+# ─────────────────────────────────────────────────────────────
+# Troubleshooting
+# ─────────────────────────────────────────────────────────────
+
+# PROBLEM: No DocumentTags rows after ingestion (Step 5 is empty)
+# CAUSE:   CategoriseChunkAsync LLM call failed or returned unparseable JSON
+# FIX:     Check API logs for "CategoriseChunkAsync failed" warnings
+#          The LLM may have returned markdown fences — already stripped in code
+#          Try a smaller file to reduce chunk count and LLM load
+
+# PROBLEM: All queries fall back to unfiltered search ("no tags matched threshold")
+# CAUSE:   Similarity threshold 0.35 too strict, or query wording too different from tag vocabulary
+# FIX:     Try a query that uses exact words from your instruction file
+#          Lower SimilarityThreshold in InstructionAgent.cs (e.g. 0.25) and rebuild
+
+# PROBLEM: TagVocabularyCache logs "no DocumentTag rows found" on every query
+# CAUSE:   Step 5 failed — tags were not written to DB
+# FIX:     Recheck IngestionPipeline logs for errors during categorisation step
+
+# PROBLEM: Qdrant points missing "language"/"category" in payload (Step 6)
+# CAUSE:   Metadata re-upsert after categorisation failed silently
+# FIX:     Check IngestionPipeline logs around "re-upsert" — Qdrant may have rejected empty vectors
+
+# PROBLEM: API fails to start with Qdrant collection errors
+# CAUSE:   Collection was deleted but API wasn't restarted to auto-recreate it
+# FIX:     Run the manual curl PUT in Step 2 or restart the API

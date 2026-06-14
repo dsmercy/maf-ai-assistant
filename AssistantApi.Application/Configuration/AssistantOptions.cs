@@ -14,4 +14,7 @@ public class AssistantOptions
     /// <summary>Max instruction rules retrieved from instruction-embeddings per request. Keep low to limit prompt size.</summary>
     public int InstructionTopK { get; set; } = 5;
     public double Temperature { get; set; } = 0.2;
+
+    /// <summary>Embedding vector dimension. Must match the model: nomic-embed-text=768, mxbai-embed-large=1024.</summary>
+    public ulong VectorSize { get; set; } = 768;
 }
