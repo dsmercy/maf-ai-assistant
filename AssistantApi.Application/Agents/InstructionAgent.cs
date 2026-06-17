@@ -143,6 +143,11 @@ public class InstructionAgent : IAgent
                 "InstructionAgent retrieved {Count} rules for conversation {ConversationId}",
                 context.InstructionRules.Count, context.ConversationId);
 
+            context.PublishEvent(new InstructionsRetrievedEvent(
+                Name, DateTimeOffset.UtcNow,
+                context.InstructionRules.Count,
+                matched.Select(x => $"{x.entry.Language}/{x.entry.Category}").ToList()));
+
             return new AgentResult { Success = true };
         }
         catch (Exception ex)

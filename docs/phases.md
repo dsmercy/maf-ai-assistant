@@ -16,7 +16,7 @@
 ## PHASE 2 — INGESTION PIPELINE ✅
 **Goal:** Index repositories and documents into Qdrant
 
-- IngestionService background worker (polls PostgreSQL every 10s)
+- IngestionWorker BackgroundService inside AssistantApi (polls PostgreSQL every 10s)
 - Git repository cloning/fetching via LibGit2Sharp
 - ZIP upload ingestion
 - Document parsers: PDF, DOCX, Markdown, PlainText

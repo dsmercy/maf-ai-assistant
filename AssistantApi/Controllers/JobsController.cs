@@ -8,7 +8,7 @@ namespace AssistantApi.Controllers;
 /// <summary>
 /// Provides visibility into the status of background ingestion jobs.
 /// Jobs are created when repositories or documents are registered for indexing
-/// and executed asynchronously by the IngestionService worker.
+/// and executed asynchronously by the IngestionWorker hosted inside AssistantApi.
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]

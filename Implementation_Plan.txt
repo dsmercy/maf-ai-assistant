@@ -18,7 +18,7 @@ PHASE SUMMARY
 -------------
   Phase 1  Infrastructure Foundation          3-5 days
   Phase 2  Core API & Agent Skeleton          5-7 days
-  Phase 3  RAG Pipeline & Ingestion Service   7-10 days
+  Phase 3  RAG Pipeline & Ingestion Worker    7-10 days
   Phase 4  Agent Intelligence & Streaming     5-7 days
   Phase 5  Open WebUI Integration & Auth      5-7 days
   Phase 6  Enterprise Hardening               5-7 days
@@ -88,7 +88,7 @@ SOLUTION STRUCTURE
   AssistantApi.Core            Domain entities, interfaces, abstract agent contracts
   AssistantApi.Application     Use cases, DTOs, FluentValidation, agent orchestration
   AssistantApi.Infrastructure  EF Core, Qdrant client, Ollama client, repository impls
-  IngestionService             Background worker for repository cloning and indexing
+  AssistantApi (IngestionWorker)  BackgroundService for repository cloning and indexing
 
 AGENT FRAMEWORK SCAFFOLD
   OrchestratorAgent   Routes incoming chat messages to appropriate agents
@@ -125,7 +125,7 @@ MILESTONE VERIFICATION
 
 
 --------------------------------------------------------------------------------
-PHASE 3 — RAG PIPELINE & INGESTION SERVICE
+PHASE 3 — RAG PIPELINE & INGESTION WORKER
 Estimated Duration: 7-10 Days
 --------------------------------------------------------------------------------
 

@@ -108,29 +108,6 @@ services:
       retries: 5
       start_period: 30s
 
-  ingestion-service:
-    build:
-      context: .
-      dockerfile: IngestionService/Dockerfile
-    container_name: ingestion-service
-    restart: unless-stopped
-    environment:
-      DOTNET_ENVIRONMENT: Production
-      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-      Ollama__BaseUrl: "http://ollama:11434"
-      Qdrant__Host: "qdrant"
-      Qdrant__Port: "6334"
-      Ingestion__RepositoryCachePath: "/data/repository-cache"
-      Ingestion__UploadPath: "/data/uploads"
-    volumes:
-      - repository-cache:/data/repository-cache
-      - uploads-data:/data/uploads
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - ai-assistant-net
-
   postgres:
     image: postgres:16-alpine
     container_name: postgres

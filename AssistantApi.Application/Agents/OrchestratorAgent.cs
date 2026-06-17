@@ -5,85 +5,126 @@ using Microsoft.Extensions.Logging;
 namespace AssistantApi.Application.Agents;
 
 /// <summary>
-/// Entry point for the agent pipeline. Coordinates all other agents in the correct order.
+/// Entry point for the agent pipeline. Resolves agents from IAgentRegistry, routes the request
+/// via IAgentRouter, and invokes each agent in order.
 ///
-/// Execution order for every request:
-///   1. ClassifyIntent — determine what the user wants
-///   2. InstructionAgent — always fetch coding standards from Qdrant
-///   3. RepositoryAgent — conditionally fetch relevant code from Qdrant
-///   4. CodingAgent — build the prompt and call the LLM
-///
-/// Also exposes StreamAsync for token-by-token streaming responses.
+/// Adding a new agent no longer requires touching this file — register it in Program.cs.
 /// </summary>
 public class OrchestratorAgent : IAgent
 {
-    private readonly InstructionAgent _instructionAgent;
-    private readonly RepositoryAgent _repositoryAgent;
-    private readonly CodingAgent _codingAgent;
+    private readonly IAgentRegistry _registry;
+    private readonly IAgentRouter _router;
+    private readonly IServiceProvider _sp;
     private readonly ILogger<OrchestratorAgent> _logger;
 
     public string Name => "OrchestratorAgent";
 
     public OrchestratorAgent(
-        InstructionAgent instructionAgent,
-        RepositoryAgent repositoryAgent,
-        CodingAgent codingAgent,
+        IAgentRegistry registry,
+        IAgentRouter router,
+        IServiceProvider sp,
         ILogger<OrchestratorAgent> logger)
     {
-        _instructionAgent = instructionAgent;
-        _repositoryAgent = repositoryAgent;
-        _codingAgent = codingAgent;
-        _logger = logger;
+        _registry = registry;
+        _router   = router;
+        _sp       = sp;
+        _logger   = logger;
     }
 
-    /// <summary>
-    /// Runs the full agent pipeline and returns the complete response as a single string.
-    /// Used by POST /api/chat (non-streaming).
-    /// </summary>
     public async Task<AgentResult> ExecuteAsync(AgentContext context)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         context.Intent = ClassifyIntent(context.UserMessage);
-        _logger.LogInformation("Intent={Intent} Conversation={ConversationId}", context.Intent, context.ConversationId);
+        context.PublishEvent(new IntentClassifiedEvent(
+            Name, DateTimeOffset.UtcNow, context.Intent, _router.GetType().Name));
 
-        await _instructionAgent.ExecuteAsync(context);
+        _logger.LogInformation("Intent={Intent} Router={Router} Conversation={ConversationId}",
+            context.Intent, _router.GetType().Name, context.ConversationId);
 
-        if (RequiresRepositoryContext(context.Intent))
-            await _repositoryAgent.ExecuteAsync(context);
+        var agentOrder = await _router.RouteAsync(
+            context,
+            _registry.Registrations.Select(r => r.Name).ToList(),
+            context.CancellationToken);
 
-        var result = await _codingAgent.ExecuteAsync(context);
+        AgentResult? lastResult = null;
+
+        foreach (var name in agentOrder)
+        {
+            var reg = _registry.Registrations.FirstOrDefault(r => r.Name == name);
+            if (reg is null)
+            {
+                _logger.LogWarning("Router returned unknown agent name '{Name}', skipping", name);
+                continue;
+            }
+
+            if (!reg.Condition(context))
+            {
+                _logger.LogDebug("Agent {Name} condition false — skipped", name);
+                continue;
+            }
+
+            var agent = reg.Factory(_sp);
+            lastResult = await agent.ExecuteAsync(context);
+
+            if (!lastResult.Success)
+                _logger.LogWarning("Agent {Name} reported failure: {Error}", name, lastResult.ErrorMessage);
+        }
 
         sw.Stop();
+        var result = lastResult ?? new AgentResult { Success = true };
         result.LatencyMs = sw.ElapsedMilliseconds;
-        result.Intent = context.Intent;
+        result.Intent    = context.Intent;
         return result;
     }
 
     /// <summary>
-    /// Runs the agent pipeline and yields response tokens as they are produced by the LLM.
-    /// Used by POST /api/chat/stream and POST /v1/chat/completions (with stream:true).
+    /// Streams tokens from the first registered IStreamingAgent in the routed order.
+    /// Non-streaming agents still run (retrieval, instructions) before the streaming agent fires.
     /// </summary>
     public async IAsyncEnumerable<string> StreamAsync(AgentContext context)
     {
         context.Intent = ClassifyIntent(context.UserMessage);
+        context.PublishEvent(new IntentClassifiedEvent(
+            Name, DateTimeOffset.UtcNow, context.Intent, _router.GetType().Name));
+
         _logger.LogInformation("Stream Intent={Intent} Conversation={ConversationId}", context.Intent, context.ConversationId);
 
-        await _instructionAgent.ExecuteAsync(context);
+        var agentOrder = await _router.RouteAsync(
+            context,
+            _registry.Registrations.Select(r => r.Name).ToList(),
+            context.CancellationToken);
 
-        if (RequiresRepositoryContext(context.Intent))
-            await _repositoryAgent.ExecuteAsync(context);
+        IStreamingAgent? streamingAgent = null;
 
-        await foreach (var token in _codingAgent.StreamAsync(context))
-            yield return token;
+        foreach (var name in agentOrder)
+        {
+            var reg = _registry.Registrations.FirstOrDefault(r => r.Name == name);
+            if (reg is null || !reg.Condition(context)) continue;
+
+            var agent = reg.Factory(_sp);
+
+            if (agent is IStreamingAgent sa)
+            {
+                streamingAgent = sa;
+                continue; // run at the end after all retrieval agents
+            }
+
+            await agent.ExecuteAsync(context);
+        }
+
+        if (streamingAgent is not null)
+        {
+            await foreach (var token in streamingAgent.StreamAsync(context))
+                yield return token;
+        }
     }
 
     /// <summary>
-    /// Classifies the user's message into one of the AgentIntent categories
-    /// by searching for characteristic keywords. More specific intents are
-    /// checked before more general ones to avoid false matches.
+    /// Classifies the user's message into one of the AgentIntent categories.
+    /// More specific intents are checked before general ones to avoid false matches.
     /// </summary>
-    private static AgentIntent ClassifyIntent(string message)
+    public static AgentIntent ClassifyIntent(string message)
     {
         var lower = message.ToLowerInvariant();
 
@@ -105,15 +146,4 @@ public class OrchestratorAgent : IAgent
 
     private static bool ContainsAny(string text, params string[] keywords)
         => keywords.Any(text.Contains);
-
-    /// <summary>
-    /// Returns true if the classified intent should trigger a Qdrant search for repository context.
-    /// Intents that generate or analyze code benefit from real codebase context.
-    /// Intents like UnitTest or Documentation for new content do not need existing code.
-    /// </summary>
-    private static bool RequiresRepositoryContext(AgentIntent intent) => intent is
-        AgentIntent.CodeReview or
-        AgentIntent.RepositoryQuestion or
-        AgentIntent.CodeExplanation or
-        AgentIntent.CodeGeneration;
 }

@@ -104,6 +104,12 @@ public class RepositoryAgent : IAgent
                 "RepositoryAgent retrieved {Count} chunks for conversation {ConversationId}",
                 context.RetrievedChunks.Count, context.ConversationId);
 
+            var activeCollections = new List<string>();
+            if (useCode) activeCollections.Add("code-embeddings");
+            if (useDocs) activeCollections.Add("doc-embeddings");
+            context.PublishEvent(new ChunksRetrievedEvent(
+                Name, DateTimeOffset.UtcNow, context.RetrievedChunks.Count, activeCollections));
+
             return new AgentResult { Success = true, Response = string.Empty };
         }
         catch (Exception ex)

@@ -56,8 +56,8 @@ curl http://localhost:5000/health/ready
 curl http://localhost:5000/api/config
 
 ## Phase 3
-docker compose build assistant-api ingestion-service
-docker compose up -d assistant-api ingestion-service
+docker compose build assistant-api
+docker compose up -d assistant-api
 
 //Then create the Qdrant collections (required before any indexing)
 curl.exe -X PUT http://localhost:6333/collections/code-embeddings -H "Content-Type: application/json" -d "{\"vectors\": {\"size\": 768, \"distance\": \"Cosine\"}}"
@@ -78,9 +78,9 @@ curl http://localhost:6333/collections/code-embeddings
 # reset the repository statuses
 docker exec -it postgres psql -U assistant -d assistant_db -c "UPDATE \"Repositories\" SET \"Status\" = 'Pending' WHERE \"Status\" = 'Indexing';"
 
-#rebuild ingestion-service
-docker compose build ingestion-service
-docker compose up -d ingestion-service
+#rebuild assistant-api (includes IngestionWorker)
+docker compose build assistant-api
+docker compose up -d assistant-api
 
 
 ##phase 5 open webui 
@@ -89,70 +89,6 @@ How is dependency injection configured in this codebase? Show me the specific fi
 
 #Code generation using codebase patterns
 Generate a new repository class following the same pattern used in this codebase. The entity should be called "Product" with fields for Name, Price, and CategoryId.
-
-
-
-##Upload instruction files
-General (7 files)
-
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\core-principles.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\security.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\testing.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\api-standards.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\observability.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\dependencies.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\general\database-safety.md"
-
-C# (10 files)
-
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\architecture.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\domain-modelling.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\cqrs-mediatr.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\ef-core.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\async-patterns.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\error-handling.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\code-quality.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\aspnetcore-api.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\testing.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\csharp\observability.md"
-
-Node.js / JavaScript (8 files)
-
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\architecture.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\express-standards.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\async-concurrency.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\error-handling.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\background-processing.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\configuration.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\database.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\javascript\testing.md"
-
-React / TypeScript (10 files)
-
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\architecture.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\api-layer.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\react-query.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\state-management.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\components.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\accessibility.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\performance.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\error-handling.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\testing.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\typescript\observability.md"
-
-Python (7 files)
-
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\architecture.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\fastapi-standards.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\async-patterns.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\error-handling.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\logging.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\agent-safety.md"
-curl.exe -X POST http://localhost:5000/api/instructions -F "file=@instructions\python\testing.md"
-
-Run all commands from the project root (c:\Projects\AI Projects\dotnet-agent\ai-coding-assistant).
-
-For a single new file added later, just run its specific command — e.g. if you add a new instructions\csharp\caching.md:
 
 # Delete jobs directly via psql
 docker exec -it postgres psql -U assistant -d assistant_db -c "DELETE FROM \"IngestionJobs\";"

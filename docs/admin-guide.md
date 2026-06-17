@@ -145,19 +145,19 @@ Queued → Running → Completed
                  → Failed
 ```
 
-- `Queued` — waiting for ingestion-service to pick it up
+- `Queued` — waiting for the IngestionWorker to pick it up
 - `Running` — currently being processed (polls every 10 seconds)
 - `Completed` — successfully indexed
 - `Failed` — error occurred; check `errorMessage` field
 
 ### Stuck jobs
 
-If the ingestion-service crashes while a job is `Running`, those jobs are automatically
+If AssistantApi crashes while a job is `Running`, those jobs are automatically
 reset to `Queued` when the service restarts. To manually reset stuck jobs, restart the
-ingestion-service container:
+assistant-api container:
 
 ```powershell
-docker compose restart ingestion-service
+docker compose restart assistant-api
 ```
 
 ---
@@ -371,7 +371,8 @@ docker compose logs -f
 
 # Specific service
 docker compose logs -f assistant-api
-docker compose logs -f ingestion-service
+# Ingestion worker logs are part of assistant-api
+docker compose logs -f assistant-api
 
 # Last 100 lines
 docker compose logs --tail=100 assistant-api

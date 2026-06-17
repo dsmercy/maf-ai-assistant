@@ -21,7 +21,7 @@ all backing services (Postgres, Qdrant, Ollama) running in Docker.
 docker compose up -d postgres qdrant ollama
 ```
 
-Do **not** start `assistant-api` or `ingestion-service` — you will run those locally.
+Do **not** start `assistant-api` — you will run it locally. The ingestion worker runs inside AssistantApi.
 
 ---
 
@@ -86,16 +86,10 @@ dotnet run --project AssistantApi/AssistantApi.csproj
 
 ---
 
-## Step 5 — Run the ingestion service locally (optional)
+## Step 5 — IngestionWorker
 
-Open a second terminal:
-
-```powershell
-cd IngestionService
-dotnet watch run
-```
-
-The ingestion worker polls the database every 10 seconds for queued jobs.
+The ingestion worker runs automatically inside AssistantApi as a `BackgroundService`.
+No separate process is needed — it starts with the API and polls PostgreSQL every 10 seconds for queued jobs.
 
 ---
 

@@ -2,11 +2,13 @@ using AssistantApi.Application.Agents;
 using AssistantApi.Application.Configuration;
 using AssistantApi.Application.Services;
 using AssistantApi.Application.Validators;
+using AssistantApi.Core.Interfaces;
 using AssistantApi.HealthChecks;
 using AssistantApi.Infrastructure;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -46,10 +48,27 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddAgents(this IServiceCollection services)
     {
-        services.AddScoped<RepositoryAgent>();
+        // Registry — singleton so registrations survive for the process lifetime
+        services.AddSingleton<AgentRegistry>();
+        services.AddSingleton<IAgentRegistry>(sp => sp.GetRequiredService<AgentRegistry>());
+
+        // Routers — rules router is always available; LLM router wraps it as fallback
+        services.AddTransient<RulesAgentRouter>();
+        services.AddTransient<LlmAgentRouter>();
+        services.AddTransient<IAgentRouter>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<AssistantOptions>>().Value;
+            return options.UseAiRouter
+                ? sp.GetRequiredService<LlmAgentRouter>()
+                : sp.GetRequiredService<RulesAgentRouter>();
+        });
+
+        // Individual agents — scoped so they share the DI scope per request
         services.AddScoped<InstructionAgent>();
+        services.AddScoped<RepositoryAgent>();
         services.AddScoped<CodingAgent>();
         services.AddScoped<OrchestratorAgent>();
+
         services.AddScoped<ChatService>();
         services.AddScoped<ToolCallService>();
         return services;

@@ -203,14 +203,12 @@ STEP 4 — CREATE .NET SOLUTION
   dotnet new classlib -n AssistantApi.Core --framework net10.0
   dotnet new classlib -n AssistantApi.Application --framework net10.0
   dotnet new classlib -n AssistantApi.Infrastructure --framework net10.0
-  dotnet new worker -n IngestionService --framework net10.0
 
   # Add all projects to solution
   dotnet sln add AssistantApi/AssistantApi.csproj
   dotnet sln add AssistantApi.Core/AssistantApi.Core.csproj
   dotnet sln add AssistantApi.Application/AssistantApi.Application.csproj
   dotnet sln add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj
-  dotnet sln add IngestionService/IngestionService.csproj
 
   # Add project references (Clean Architecture dependency flow)
   dotnet add AssistantApi/AssistantApi.csproj \
@@ -223,12 +221,6 @@ STEP 4 — CREATE .NET SOLUTION
     reference AssistantApi.Core/AssistantApi.Core.csproj
 
   dotnet add AssistantApi/AssistantApi.csproj \
-    reference AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj
-
-  dotnet add IngestionService/IngestionService.csproj \
-    reference AssistantApi.Core/AssistantApi.Core.csproj
-
-  dotnet add IngestionService/IngestionService.csproj \
     reference AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj
 
 
@@ -289,26 +281,28 @@ PHASE 2 COMPLETE WHEN:
 
 
 ================================================================================
-PHASE 3 PREREQUISITES — RAG Pipeline & Ingestion Service
+PHASE 3 PREREQUISITES — RAG Pipeline & Ingestion Worker
 ================================================================================
 
 NOTE: Phase 2 must be complete with a healthy assistant-api before Phase 3.
+NOTE: The ingestion worker runs inside AssistantApi as a BackgroundService.
+      No separate service is needed.
 
 
 STEP 1 — INSTALL DOCUMENT PARSING PACKAGES
 -------------------------------------------
   # PDF parsing
-  dotnet add IngestionService/IngestionService.csproj package PdfPig
+  dotnet add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj package PdfPig
 
   # DOCX parsing
-  dotnet add IngestionService/IngestionService.csproj \
+  dotnet add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj \
     package DocumentFormat.OpenXml
 
   # Markdown processing
-  dotnet add IngestionService/IngestionService.csproj package Markdig
+  dotnet add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj package Markdig
 
   # Git operations
-  dotnet add IngestionService/IngestionService.csproj package LibGit2Sharp
+  dotnet add AssistantApi.Infrastructure/AssistantApi.Infrastructure.csproj package LibGit2Sharp
 
   dotnet build AssistantSolution.sln
 
@@ -322,14 +316,13 @@ STEP 2 — CREATE UPLOAD DIRECTORIES
   chmod 755 data/repository-cache data/uploads
 
 
-STEP 3 — ADD ingestion-service TO DOCKER COMPOSE
---------------------------------------------------
-  # After adding ingestion-service to docker-compose.yml:
-  docker compose build ingestion-service
-  docker compose up -d ingestion-service
+STEP 3 — REBUILD ASSISTANT-API (includes IngestionWorker)
+----------------------------------------------------------
+  docker compose build assistant-api
+  docker compose up -d assistant-api
 
-  # Confirm ingestion service is running
-  docker compose logs ingestion-service --tail=20
+  # Confirm worker started (look for "IngestionWorker started" in logs)
+  docker compose logs assistant-api --tail=20
 
 
 STEP 4 — RUN POSTGRESQL MIGRATION (PHASE 3 TABLES)
@@ -490,8 +483,8 @@ STEP 4 — TEST FILE UPLOAD VIA OPEN WEBUI
     3. Upload a ZIP file (repository) or PDF (document)
     4. Observe ingestion job created in backend logs
 
-  # Monitor ingestion from terminal
-  docker compose logs ingestion-service -f
+  # Monitor ingestion from terminal (worker runs inside assistant-api)
+  docker compose logs assistant-api -f
 
 PHASE 5 COMPLETE WHEN:
   [ ] Full chat workflow works through Open WebUI browser

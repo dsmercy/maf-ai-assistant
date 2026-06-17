@@ -152,8 +152,8 @@ docker exec ollama ollama list
 ## Step 7 — Build and start the application services
 
 ```powershell
-docker compose build assistant-api ingestion-service
-docker compose up -d assistant-api ingestion-service open-webui
+docker compose build assistant-api
+docker compose up -d assistant-api open-webui
 ```
 
 ---

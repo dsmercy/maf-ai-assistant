@@ -17,4 +17,10 @@ public class AssistantOptions
 
     /// <summary>Embedding vector dimension. Must match the model: nomic-embed-text=768, mxbai-embed-large=1024.</summary>
     public ulong VectorSize { get; set; } = 768;
+
+    /// <summary>When true, uses LlmAgentRouter to pick agents dynamically. Falls back to RulesAgentRouter on error.</summary>
+    public bool UseAiRouter { get; set; } = false;
+
+    /// <summary>Ollama model for the LLM router. Defaults to ChatModel when empty. Use a smaller/faster model here.</summary>
+    public string RouterModel { get; set; } = string.Empty;
 }

@@ -16,8 +16,9 @@ namespace AssistantApi.Application.Agents;
 ///   - Falls back to a hardcoded default if no template exists in the database
 ///
 /// Provides both blocking (ExecuteAsync) and streaming (StreamAsync) variants.
+/// Implements IStreamingAgent so OrchestratorAgent can discover it via the registry.
 /// </summary>
-public class CodingAgent : IAgent
+public class CodingAgent : IStreamingAgent
 {
     private readonly IOllamaClient _ollama;
     private readonly IPromptTemplateRepository _templates;
@@ -46,11 +47,14 @@ public class CodingAgent : IAgent
     {
         try
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var messages = await BuildMessagesAsync(context);
             _logger.LogInformation("CodingAgent calling {Model} for intent {Intent} conversation {ConversationId}",
                 _options.ChatModel, context.Intent, context.ConversationId);
 
             var response = await _ollama.ChatAsync(_options.ChatModel, messages, context.CancellationToken);
+            sw.Stop();
+            context.PublishEvent(new ResponseGeneratedEvent(Name, DateTimeOffset.UtcNow, sw.ElapsedMilliseconds, Streamed: false));
             return new AgentResult { Success = true, Response = response };
         }
         catch (Exception ex)

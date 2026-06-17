@@ -52,6 +52,20 @@ public class AgentContext
 
     /// <summary>Cancellation token propagated from the HTTP request.</summary>
     public CancellationToken CancellationToken { get; init; }
+
+    // ── Message bus ────────────────────────────────────────────────────────────
+
+    private readonly List<IAgentEvent> _events = [];
+
+    /// <summary>Publishes an event to the in-process event log for this pipeline run.</summary>
+    public void PublishEvent(IAgentEvent @event) => _events.Add(@event);
+
+    /// <summary>Returns all events of type <typeparamref name="T"/> published so far.</summary>
+    public IReadOnlyList<T> GetEvents<T>() where T : IAgentEvent
+        => _events.OfType<T>().ToList();
+
+    /// <summary>All events published during this pipeline run, in order.</summary>
+    public IReadOnlyList<IAgentEvent> AllEvents => _events;
 }
 
 /// <summary>

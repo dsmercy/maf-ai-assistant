@@ -3,7 +3,7 @@ namespace AssistantApi.Core.Entities;
 /// <summary>
 /// Represents a background ingestion job that processes a repository or document
 /// into vector embeddings stored in Qdrant. Jobs are queued by the API and
-/// processed asynchronously by the IngestionService worker.
+/// processed asynchronously by the IngestionWorker hosted inside AssistantApi.
 /// </summary>
 public class IngestionJob
 {
